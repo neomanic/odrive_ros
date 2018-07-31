@@ -15,11 +15,11 @@ from odrive_interface import ODriveInterfaceSerial, ODriveInterfaceAPI
 class ROSLogger(object):
     """Imitate a standard Python logger, but pass the messages to rospy logging.
     """
-    def debug(self, msg):    rospy.logdebug(msg)     # print(msg)#
-    def info(self, msg):     rospy.loginfo(msg)      # print(msg)#
-    def warn(self, msg):     rospy.logwarn(msg)      # print(msg)#
-    def error(self, msg):    rospy.logerr(msg)       # print(msg)#
-    def critical(self, msg): rospy.logfatal(msg)     # print(msg)#
+    def debug(self, msg):    rospy.logdebug(msg)
+    def info(self, msg):     rospy.loginfo(msg) 
+    def warn(self, msg):     rospy.logwarn(msg) 
+    def error(self, msg):    rospy.logerr(msg)  
+    def critical(self, msg): rospy.logfatal(msg)
     
 
 # TODO: map to ROS parameters
@@ -96,7 +96,7 @@ class ODriveNode(object):
         #self.right_motor_pub.publish(right_linear_rpm)
         #wheel_left.set_speed(v_l)
         #wheel_right.set_speed(v_r)
-        rospy.loginfo("Driving left: %d, right: %d, from linear.x %.2f and angular.z %.2f" % (left_linear_val, right_linear_val,msg.linear.x, msg.angular.z))
+        rospy.logdebug("Driving left: %d, right: %d, from linear.x %.2f and angular.z %.2f" % (left_linear_val, right_linear_val,msg.linear.x, msg.angular.z))
         self.driver.drive(-left_linear_val, right_linear_val)
         
         #self.last_speed = max(abs(left_linear_rpm), abs(right_linear_rpm))

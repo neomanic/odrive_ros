@@ -128,19 +128,18 @@ class ODriveInterfaceAPI(object):
             return
 
         self.logger.debug("Vbus %.2fV" % self.driver.vbus_voltage)
-        self.logger.debug("Vbus %.2fV" % self.driver.vbus_voltage)
         
             
         self.logger.debug("Calibrating left motor...")
         self.driver.axis1.requested_state = AXIS_STATE_FULL_CALIBRATION_SEQUENCE
-        time.sleep(1)
+        #time.sleep(1)
         while self.driver.axis1.current_state != AXIS_STATE_IDLE:
            time.sleep(0.1)
 
             
         self.logger.debug("Calibrating right motor...")
         self.driver.axis0.requested_state = AXIS_STATE_FULL_CALIBRATION_SEQUENCE
-        time.sleep(1)
+        #time.sleep(1)
         while self.driver.axis0.current_state != AXIS_STATE_IDLE:
             time.sleep(0.1)
             
@@ -173,6 +172,6 @@ class ODriveInterfaceAPI(object):
             self.logger.error("Not connected.")
             return
             
-        self.driver.axis0.controller.vel_setpoint = 500
-        self.driver.axis1.controller.vel_setpoint = 500
+        self.driver.axis0.controller.vel_setpoint = right_motor_val
+        self.driver.axis1.controller.vel_setpoint = left_motor_val
 
