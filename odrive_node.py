@@ -42,8 +42,9 @@ def convert(forward, ccw):
     return left_linear_val, right_linear_val
 
 class ODriveNode(object):
-    last_speed = None
+    last_speed = 0.0
     driver = None
+    last_cmd_vel_time = None
     
     def __init__(self):
         self.driver = ODriveInterfaceAPI(logger=ROSLogger())
@@ -65,10 +66,13 @@ class ODriveNode(object):
         
         self.vel_subscribe = rospy.Subscriber("/cmd_vel", Twist, self.cmd_vel_callback, queue_size=2)
         
+        self.timer = rospy.Timer(rospy.Duration(0.1), self.timer_check) # stop motors if no cmd_vel received > 1second
+        
         rospy.loginfo("ODrive connected and configured. Ready to drive.")
         
     def terminate(self):
         self.driver.release()
+        self.timer.shutdown()
 
     def cmd_vel_callback(self, msg):
         #rospy.loginfo("Received a /cmd_vel message!")
@@ -87,25 +91,38 @@ class ODriveNode(object):
         #right_linear_rpm = (msg.linear.x + angular_to_linear) * m_s_to_erpm
         left_linear_val, right_linear_val = convert(msg.linear.x, msg.angular.z)
         
-        # if wheel speed = 0, stop publishing after sending 0. #TODO add error term, work out why VESC turns on for 0 rpm
-        #if self.last_speed == 0 and abs(left_linear_val) == 0 and abs(right_linear_val) == 0:
-        #    return
+        # if wheel speed = 0, stop publishing after sending 0 once. #TODO add error term, work out why VESC turns on for 0 rpm
+        if self.last_speed == 0 and abs(left_linear_val) == 0 and abs(right_linear_val) == 0:
+            return
         
         # Then set your wheel speeds (using wheel_left and wheel_right as examples)
         #self.left_motor_pub.publish(left_linear_rpm)
         #self.right_motor_pub.publish(right_linear_rpm)
         #wheel_left.set_speed(v_l)
         #wheel_right.set_speed(v_r)
-        rospy.logdebug("Driving left: %d, right: %d, from linear.x %.2f and angular.z %.2f" % (left_linear_val, right_linear_val,msg.linear.x, msg.angular.z))
+        rospy.logdebug("Driving left: %d, right: %d, from linear.x %.2f and angular.z %.2f" % (left_linear_val, right_linear_val, msg.linear.x, msg.angular.z))
         self.driver.drive(-left_linear_val, right_linear_val)
+
+        self.last_speed = max(abs(left_linear_val), abs(right_linear_val))
+        self.last_cmd_vel_time = rospy.Time.now()
         
-        #self.last_speed = max(abs(left_linear_rpm), abs(right_linear_rpm))
+    def timer_check(self, event):
+        """Check for cmd_vel 1 sec timeout. """
+        if self.last_cmd_vel_time is None:
+            return
         
+        # if moving, and no cmd_vel received, stop
+        if (event.current_real-self.last_cmd_vel_time).to_sec() > 1.0 and (self.last_speed > 0):
+            rospy.logdebug("No /cmd_vel received in > 1s, stopping.")
+            self.driver.drive(0,0)
+            self.last_cmd_vel_time = event.current_real
+            
 
 def start_odrive():
     rospy.init_node('odrive')
     odrive_node = ODriveNode()
     rospy.on_shutdown(odrive_node.terminate)
+    
     rospy.spin() 
     
 if __name__ == '__main__':
