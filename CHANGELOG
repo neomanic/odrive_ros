@@ -1,0 +1,7 @@
+ ## 0.1.0 2018-09-07
+
+- Turned into a proper ROS package: just need to checkout repository into your workspace's src/ dir.
+
+## 2018-07-31
+
+- Initial commit

@@ -15,41 +15,51 @@ from odrive_interface import ODriveInterfaceSerial, ODriveInterfaceAPI
 class ROSLogger(object):
     """Imitate a standard Python logger, but pass the messages to rospy logging.
     """
-    def debug(self, msg):    rospy.logdebug(msg)
-    def info(self, msg):     rospy.loginfo(msg) 
-    def warn(self, msg):     rospy.logwarn(msg) 
-    def error(self, msg):    rospy.logerr(msg)  
-    def critical(self, msg): rospy.logfatal(msg)
+    def debug(self, msg):    rospy.logdebug(msg)  #  print(msg) #
+    def info(self, msg):     rospy.loginfo(msg)   #  print(msg) #
+    def warn(self, msg):     rospy.logwarn(msg)   #  print(msg) #
+    def error(self, msg):    rospy.logerr(msg)    #  print(msg) #
+    def critical(self, msg): rospy.logfatal(msg)  #  print(msg) #
     
-
-# TODO: map to ROS parameters
-wheelbase = 0.3             # m, distance between wheel centres
-tyre_circumference = 0.35    # used to translate velocity commands in m/s into motor rpm
+    # use_index = False (bool)
+    # offset_float = 0.590887010098 (float)
+    # calib_range = 0.019999999553 (float)
+    # mode = 0 (int)
+    # offset = 1809 (int)
+    # cpr = 4096 (int)
+    # idx_search_speed = 10.0 (float)
+    # pre_calibrated = False (bool)
 
 #m_s_to_rpm = 60.0/tyre_circumference
 #m_s_to_erpm = 10 * m_s_to_rpm 
 
 # 4096 counts / rev, so 4096 == 1 rev/s
-m_s_to_value = 4096/tyre_circumference
+
 
 # 1 m/s = 3.6 km/hr
-
-def convert(forward, ccw):
-    angular_to_linear = ccw * (wheelbase/2.0) 
-    left_linear_val  = int((forward - angular_to_linear) * m_s_to_value)
-    right_linear_val = int((forward + angular_to_linear) * m_s_to_value)
-    
-    return left_linear_val, right_linear_val
 
 class ODriveNode(object):
     last_speed = 0.0
     driver = None
     last_cmd_vel_time = None
     
+    # Robot wheelbase params for velocity -> motor speed conversion
+    wheelbase = None
+    tyre_circumference = None
+    encoder_counts_per_rev = None
+    m_s_to_value = None
+    
     def __init__(self):
+        self.wheelbase = float(rospy.get_param('~wheelbase', 0.3)) # m, distance between wheel centres
+        self.tyre_circumference = float(rospy.get_param('~tyre_circumference', 0.35)) # used to translate velocity commands in m/s into motor rpm
+        self.encoder_counts_per_rev = int(rospy.get_param('~encoder_counts_per_rev', 4096))
+        self.m_s_to_value = self.encoder_counts_per_rev/self.tyre_circumference
+        #print(self.wheelbase, self.tyre_circumference)
+        #TODO: pull encoder count from odrive config, od.driver.axis1.encoder.config.cpr
+        
         self.driver = ODriveInterfaceAPI(logger=ROSLogger())
-        rospy.loginfo("Connecting...")
-        self.driver.connect('/dev/ttyACM0')
+        rospy.loginfo("Connecting to ODrive...")
+        self.driver.connect()
         #    import sys; sys.exit(1)
             
         self.driver.setup()
@@ -73,6 +83,13 @@ class ODriveNode(object):
     def terminate(self):
         self.driver.release()
         self.timer.shutdown()
+        
+    def convert(forward, ccw):
+        angular_to_linear = ccw * (self.wheelbase/2.0) 
+        left_linear_val  = int((forward - angular_to_linear) * self.m_s_to_value)
+        right_linear_val = int((forward + angular_to_linear) * self.m_s_to_value)
+    
+        return left_linear_val, right_linear_val
 
     def cmd_vel_callback(self, msg):
         #rospy.loginfo("Received a /cmd_vel message!")
@@ -89,7 +106,7 @@ class ODriveNode(object):
         #angular_to_linear = msg.angular.z * (wheelbase/2.0) 
         #left_linear_rpm  = (msg.linear.x - angular_to_linear) * m_s_to_erpm
         #right_linear_rpm = (msg.linear.x + angular_to_linear) * m_s_to_erpm
-        left_linear_val, right_linear_val = convert(msg.linear.x, msg.angular.z)
+        left_linear_val, right_linear_val = self.convert(msg.linear.x, msg.angular.z)
         
         # if wheel speed = 0, stop publishing after sending 0 once. #TODO add error term, work out why VESC turns on for 0 rpm
         if self.last_speed == 0 and abs(left_linear_val) == 0 and abs(right_linear_val) == 0:
@@ -115,6 +132,7 @@ class ODriveNode(object):
         if (event.current_real-self.last_cmd_vel_time).to_sec() > 1.0 and (self.last_speed > 0):
             rospy.logdebug("No /cmd_vel received in > 1s, stopping.")
             self.driver.drive(0,0)
+            self.last_speed = 0
             self.last_cmd_vel_time = event.current_real
             
 

@@ -1,6 +1,7 @@
 import serial
 from serial.serialutil import SerialException
 
+import sys
 import time
 import logging
 
@@ -121,6 +122,7 @@ class ODriveInterfaceAPI(object):
                     
     def connect(self, port=None):
         self.driver = odrive.find_any(timeout=30, logger=self.logger)
+        self.axes = (self.driver.axis0, self.driver.axis1)
 
     def setup(self):
         if not self.driver:
@@ -128,22 +130,17 @@ class ODriveInterfaceAPI(object):
             return
 
         self.logger.debug("Vbus %.2fV" % self.driver.vbus_voltage)
+        self.logger.debug("Vbus %.2fV" % self.driver.vbus_voltage)
         
-            
-        self.logger.debug("Calibrating left motor...")
-        self.driver.axis1.requested_state = AXIS_STATE_FULL_CALIBRATION_SEQUENCE
-        #time.sleep(1)
-        while self.driver.axis1.current_state != AXIS_STATE_IDLE:
-           time.sleep(0.1)
-
-            
-        self.logger.debug("Calibrating right motor...")
-        self.driver.axis0.requested_state = AXIS_STATE_FULL_CALIBRATION_SEQUENCE
-        #time.sleep(1)
-        while self.driver.axis0.current_state != AXIS_STATE_IDLE:
-            time.sleep(0.1)
-            
-    
+        for i, axis in enumerate(self.axes):
+            self.logger.debug("Calibrating axis %d..." % i)
+            axis.requested_state = AXIS_STATE_FULL_CALIBRATION_SEQUENCE
+            time.sleep(1)
+            while axis.current_state != AXIS_STATE_IDLE:
+                time.sleep(0.1)
+            if axis.error != 0:
+                self.logger.error("Failed with axis error 0x%x, motor error 0x%x" % (axis.error, axis.motor.error))
+                sys.exit(1)
             
     def engage(self):
         if not self.driver:
