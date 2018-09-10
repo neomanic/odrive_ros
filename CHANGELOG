@@ -1,4 +1,9 @@
- ## 0.1.0 2018-09-07
+
+## 0.1.1 2018-09-10
+
+- Switched to modified BSD license from MIT, same as ROS proper.
+
+## 0.1.0 2018-09-07
 
 - Turned into a proper ROS package: just need to checkout repository into your workspace's src/ dir.
 

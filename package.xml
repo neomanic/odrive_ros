@@ -1,9 +1,9 @@
 <?xml version="1.0"?>
 <package format="2">
   <name>odrive_ros</name>
-  <version>0.1.0</version>
+  <version>0.1.1</version>
   <description>ODrive motor controller driver for ROS</description>
-  <license>MIT</license>
+  <license>Modified BSD</license>
 
   <maintainer email="josh.marshall@tecevo.com">Josh Marshall, Tecevo</maintainer>
   <url type="website">https://github.com/neomanic/odrive_ros</url>
