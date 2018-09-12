@@ -1,4 +1,9 @@
 
+## 0.1.2 2018-09-12
+
+Abstracted left/right motors up into the node, so axis0 and axis1 can be assigned to either.
+Fixed dumb bug in cleaning up node class.
+
 ## 0.1.1 2018-09-10
 
 - Switched to modified BSD license from MIT, same as ROS proper.

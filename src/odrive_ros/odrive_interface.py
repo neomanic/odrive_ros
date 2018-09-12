@@ -164,11 +164,11 @@ class ODriveInterfaceAPI(object):
         self.driver.axis0.requested_state = AXIS_STATE_IDLE
         self.driver.axis1.requested_state = AXIS_STATE_IDLE
     
-    def drive(self, left_motor_val, right_motor_val):
+    def drive(self, axis0_motor_val, axis1_motor_val):
         if not self.driver:
             self.logger.error("Not connected.")
             return
             
-        self.driver.axis0.controller.vel_setpoint = right_motor_val
-        self.driver.axis1.controller.vel_setpoint = left_motor_val
+        self.driver.axis0.controller.vel_setpoint = -axis0_motor_val
+        self.driver.axis1.controller.vel_setpoint = axis1_motor_val
 

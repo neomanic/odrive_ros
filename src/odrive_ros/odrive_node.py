@@ -48,8 +48,10 @@ class ODriveNode(object):
     tyre_circumference = None
     encoder_counts_per_rev = None
     m_s_to_value = None
+    axis_for_right = 0
     
     def __init__(self):
+        self.axis_for_right = float(rospy.get_param('~axis_for_right', 0)) # if right calibrates first, this should be 0, else 1
         self.wheelbase = float(rospy.get_param('~wheelbase', 0.3)) # m, distance between wheel centres
         self.tyre_circumference = float(rospy.get_param('~tyre_circumference', 0.35)) # used to translate velocity commands in m/s into motor rpm
         self.encoder_counts_per_rev = int(rospy.get_param('~encoder_counts_per_rev', 4096))
@@ -84,7 +86,7 @@ class ODriveNode(object):
         self.driver.release()
         self.timer.shutdown()
         
-    def convert(forward, ccw):
+    def convert(self, forward, ccw):
         angular_to_linear = ccw * (self.wheelbase/2.0) 
         left_linear_val  = int((forward - angular_to_linear) * self.m_s_to_value)
         right_linear_val = int((forward + angular_to_linear) * self.m_s_to_value)
@@ -117,8 +119,12 @@ class ODriveNode(object):
         #self.right_motor_pub.publish(right_linear_rpm)
         #wheel_left.set_speed(v_l)
         #wheel_right.set_speed(v_r)
+        
+        axis0_val = right_linear_val if self.axis_for_right == 0 else left_linear_val
+        axis1_val = left_linear_val  if self.axis_for_right == 0 else right_linear_val
+
         rospy.logdebug("Driving left: %d, right: %d, from linear.x %.2f and angular.z %.2f" % (left_linear_val, right_linear_val, msg.linear.x, msg.angular.z))
-        self.driver.drive(-left_linear_val, right_linear_val)
+        self.driver.drive(axis0_val, axis1_val)
 
         self.last_speed = max(abs(left_linear_val), abs(right_linear_val))
         self.last_cmd_vel_time = rospy.Time.now()
