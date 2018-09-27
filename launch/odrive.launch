@@ -1,8 +1,16 @@
 <!-- -*- mode: XML -*- -->
 <launch>
+    <arg name="connect_on_startup"   default="true"/>
+    <arg name="calibrate_on_startup" default="true"/>
+    <arg name="engage_on_startup"    default="true"/>
+    
     <node pkg="odrive_ros" type="odrive_node" name="odrive" output="screen">
         <param name="wheelbase" value="0.3"/>
         <param name="tyre_circumference" value="0.35"/>
         <param name="encoder_counts_per_rev" value="4096"/>
+        
+        <param name="connect_on_startup"   value="$(arg connect_on_startup)"/>
+        <param name="calibrate_on_startup" value="$(arg calibrate_on_startup)"/>
+        <param name="engage_on_startup"    value="$(arg engage_on_startup)"/>
     </node>
 </launch>

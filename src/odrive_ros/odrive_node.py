@@ -7,6 +7,7 @@ import tf.transformations
 
 from std_msgs.msg import Float64
 from geometry_msgs.msg import Twist
+import std_srvs.srv
 
 import time
 
@@ -50,6 +51,11 @@ class ODriveNode(object):
     m_s_to_value = None
     axis_for_right = 0
     
+    # Startup parameters
+    connect_on_startup = False
+    calibrate_on_startup = False
+    engage_on_startup = False
+    
     def __init__(self):
         self.axis_for_right = float(rospy.get_param('~axis_for_right', 0)) # if right calibrates first, this should be 0, else 1
         self.wheelbase = float(rospy.get_param('~wheelbase', 0.3)) # m, distance between wheel centres
@@ -59,33 +65,103 @@ class ODriveNode(object):
         #print(self.wheelbase, self.tyre_circumference)
         #TODO: pull encoder count from odrive config, od.driver.axis1.encoder.config.cpr
         
-        self.driver = ODriveInterfaceAPI(logger=ROSLogger())
-        rospy.loginfo("Connecting to ODrive...")
-        self.driver.connect()
+        self.connect_on_startup   = rospy.get_param('~connect_on_startup', False)
+        self.calibrate_on_startup = rospy.get_param('~calibrate_on_startup', False)
+        self.engage_on_startup    = rospy.get_param('~engage_on_startup', False)
+        
         #    import sys; sys.exit(1)
-            
-        self.driver.setup()
-        self.driver.engage()
-                
-        # /commands/motor/brake
-        # /commands/motor/current
-        # /commands/motor/duty_cycle
-        # /commands/motor/position
-        # /commands/motor/speed
-        # /commands/servo/position
         
-        #odrv0.axis0.motor.current_meas_phC 
-        
+        rospy.on_shutdown(self.terminate)
+
+        rospy.Service('odrive/connect_driver',    std_srvs.srv.Trigger, self.connect_driver)
+        rospy.Service('odrive/disconnect_driver', std_srvs.srv.Trigger, self.disconnect_driver)
+    
+        rospy.Service('odrive/calibrate_motors',  std_srvs.srv.Trigger, self.calibrate_motor)
+        rospy.Service('odrive/engage_motors',     std_srvs.srv.Trigger, self.engage_motor)
+        rospy.Service('odrive/release_motors',    std_srvs.srv.Trigger, self.release_motor)
+
         self.vel_subscribe = rospy.Subscriber("/cmd_vel", Twist, self.cmd_vel_callback, queue_size=2)
         
         self.timer = rospy.Timer(rospy.Duration(0.1), self.timer_check) # stop motors if no cmd_vel received > 1second
         
+        if not self.connect_on_startup:
+            rospy.loginfo("ODrive node started, but not connected.")
+            return
+        
+        if not self.connect_driver(None)[0]:
+            return # Failed to connect
+        
+        if not self.calibrate_on_startup:
+            rospy.loginfo("ODrive node started and connected. Not calibrated.")
+            return
+        
+        if not self.calibrate_motor(None)[0]:
+            return
+            
+        if not self.engage_on_startup:
+            rospy.loginfo("ODrive connected and configured. Engage to drive.")
+            return
+        
+        if not self.calibrate_motor(None)[0]:
+            return
+        
         rospy.loginfo("ODrive connected and configured. Ready to drive.")
         
     def terminate(self):
-        self.driver.release()
+        if self.driver:
+            self.driver.release()
         self.timer.shutdown()
+    
+    # ROS services
+    def connect_driver(self, request):
+        if self.driver:
+            rospy.logerr("Already connected.")
+            return (False, "Already connected.")
         
+        self.driver = ODriveInterfaceAPI(logger=ROSLogger())
+        rospy.loginfo("Connecting to ODrive...")
+        if not self.driver.connect():
+            self.driver = False
+            rospy.logerr("Failed to connected.")
+            return (False, "Failed to connect.")
+            
+        rospy.loginfo("ODrive connected.")
+        return (True, "ODrive connected successfully")
+    
+    def disconnect_driver(self, request):
+        if not self.driver:
+            rospy.logerr("Not connected.")
+            return (False, "Not connected.")
+        if not self.driver.disconnect():
+            return (False, "Failed disconnection, but try reconnecting.")
+        return (True, "Disconnection success.")
+    
+    def calibrate_motor(self, request):
+        if not self.driver:
+            rospy.logerr("Not connected.")
+            return (False, "Not connected.")
+        if not self.driver.calibrate():
+            return (False, "Failed calibration.")
+        return (True, "Calibration success.")
+                    
+    def engage_motor(self, request):
+        if not self.driver:
+            rospy.logerr("Not connected.")
+            return (False, "Not connected.")
+        if not self.driver.engage():
+            return (False, "Failed to engage motor.")
+        return (True, "Engage motor success.")
+    
+    def release_motor(self, request):
+        if not self.driver:
+            rospy.logerr("Not connected.")
+            return (False, "Not connected.")
+        if not self.driver.release():
+            return (False, "Failed to release motor.")
+        return (True, "Release motor success.")
+        
+    # Helpers and callbacks
+    
     def convert(self, forward, ccw):
         angular_to_linear = ccw * (self.wheelbase/2.0) 
         left_linear_val  = int((forward - angular_to_linear) * self.m_s_to_value)
@@ -131,6 +207,9 @@ class ODriveNode(object):
         
     def timer_check(self, event):
         """Check for cmd_vel 1 sec timeout. """
+        if not self.driver:
+            return
+        
         if self.last_cmd_vel_time is None:
             return
         
@@ -145,7 +224,6 @@ class ODriveNode(object):
 def start_odrive():
     rospy.init_node('odrive')
     odrive_node = ODriveNode()
-    rospy.on_shutdown(odrive_node.terminate)
     
     rospy.spin() 
     

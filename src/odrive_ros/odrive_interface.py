@@ -118,34 +118,56 @@ class ODriveInterfaceAPI(object):
         self.logger = logger if logger else default_logger
                 
     def __del__(self):
-        self.release()
+        self.disconnect()
                     
     def connect(self, port=None):
-        self.driver = odrive.find_any(timeout=30, logger=self.logger)
-        self.axes = (self.driver.axis0, self.driver.axis1)
-
-    def setup(self):
+        if self.driver:
+            self.logger.info("Already connected. Disconnecting and reconnecting.")
+        
+        try:
+            self.driver = odrive.find_any(timeout=30, logger=self.logger)
+            self.axes = (self.driver.axis0, self.driver.axis1)
+        except:
+            self.logger.error("No ODrive found. Is device powered?")
+            return False
+        return True
+        
+    def disconnect(self):
         if not self.driver:
             self.logger.error("Not connected.")
-            return
+            return False
+        
+        temp_driver = self.driver
+        self.driver = None
+        try:
+            temp_driver.release()
+        except:
+            return False
+        return True
 
-        self.logger.debug("Vbus %.2fV" % self.driver.vbus_voltage)
-        self.logger.debug("Vbus %.2fV" % self.driver.vbus_voltage)
+    def calibrate(self):
+        if not self.driver:
+            self.logger.error("Not connected.")
+            return False
+        
+        self.logger.info("Vbus %.2fV" % self.driver.vbus_voltage)
         
         for i, axis in enumerate(self.axes):
-            self.logger.debug("Calibrating axis %d..." % i)
+            self.logger.info("Calibrating axis %d..." % i)
             axis.requested_state = AXIS_STATE_FULL_CALIBRATION_SEQUENCE
             time.sleep(1)
             while axis.current_state != AXIS_STATE_IDLE:
                 time.sleep(0.1)
             if axis.error != 0:
                 self.logger.error("Failed with axis error 0x%x, motor error 0x%x" % (axis.error, axis.motor.error))
-                sys.exit(1)
+                return False
+                
+        return True
             
     def engage(self):
         if not self.driver:
             self.logger.error("Not connected.")
-            return
+            return False
 
         self.logger.debug("Setting drive mode.")
         self.driver.axis0.requested_state = AXIS_STATE_CLOSED_LOOP_CONTROL
@@ -157,8 +179,11 @@ class ODriveInterfaceAPI(object):
         self.driver.axis0.controller.vel_setpoint = 0
         self.driver.axis1.controller.vel_setpoint = 0
         
+        return True
+        
     def release(self):
         if not self.driver:
+            self.logger.error("Not connected.")
             return
         self.logger.debug("Releasing.")
         self.driver.axis0.requested_state = AXIS_STATE_IDLE

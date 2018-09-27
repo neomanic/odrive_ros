@@ -1,4 +1,9 @@
 
+## 0.2.0 2018-09-25
+
+Various services for connecting, calibrating, engage/release, etc.
+Parameters to set whether connection and calibration happens on startup.
+
 ## 0.1.2 2018-09-12
 
 Abstracted left/right motors up into the node, so axis0 and axis1 can be assigned to either.
