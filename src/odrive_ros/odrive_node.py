@@ -102,7 +102,7 @@ class ODriveNode(object):
             rospy.loginfo("ODrive connected and configured. Engage to drive.")
             return
         
-        if not self.calibrate_motor(None)[0]:
+        if not self.engage_motor(None)[0]:
             return
         
         rospy.loginfo("ODrive connected and configured. Ready to drive.")
