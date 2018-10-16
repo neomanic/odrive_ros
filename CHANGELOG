@@ -1,4 +1,9 @@
 
+## 0.3.0 2018-10-15
+
+Now uses the ODrive `preroll` branch to allow use of encoders with no index. 
+Set ROS param `use_preroll` to False for old behaviour.
+
 ## 0.2.1 2018-10-03
 
 Bug in startup sequence (calibrated twice)

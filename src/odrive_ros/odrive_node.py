@@ -69,6 +69,7 @@ class ODriveNode(object):
         self.calibrate_on_startup = rospy.get_param('~calibrate_on_startup', False)
         self.engage_on_startup    = rospy.get_param('~engage_on_startup', False)
         
+        self.has_preroll = rospy.get_param('~use_preroll', True)
         #    import sys; sys.exit(1)
         
         rospy.on_shutdown(self.terminate)
@@ -140,8 +141,14 @@ class ODriveNode(object):
         if not self.driver:
             rospy.logerr("Not connected.")
             return (False, "Not connected.")
-        if not self.driver.calibrate():
-            return (False, "Failed calibration.")
+            
+        if self.has_preroll:
+            if not self.driver.preroll():
+                return (False, "Failed preroll.")        
+        else:
+            if not self.driver.calibrate():
+                return (False, "Failed calibration.")
+                
         return (True, "Calibration success.")
                     
     def engage_motor(self, request):

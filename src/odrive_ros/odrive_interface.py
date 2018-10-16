@@ -159,25 +159,44 @@ class ODriveInterfaceAPI(object):
             while axis.current_state != AXIS_STATE_IDLE:
                 time.sleep(0.1)
             if axis.error != 0:
-                self.logger.error("Failed with axis error 0x%x, motor error 0x%x" % (axis.error, axis.motor.error))
+                self.logger.error("Failed calibration with axis error 0x%x, motor error 0x%x" % (axis.error, axis.motor.error))
                 return False
                 
         return True
+        
+    def preroll(self):
+        if not self.driver:
+            self.logger.error("Not connected.")
+            return False
             
+        self.logger.info("Vbus %.2fV" % self.driver.vbus_voltage)
+
+        for i, axis in enumerate(self.axes):
+            self.logger.info("Index search preroll axis %d..." % i)
+            axis.requested_state = AXIS_STATE_ENCODER_INDEX_SEARCH
+        
+        for i, axis in enumerate(self.axes):
+            while axis.current_state != AXIS_STATE_IDLE:
+                time.sleep(0.1)
+
+        for i, axis in enumerate(self.axes):
+            if axis.error != 0:
+                self.logger.error("Failed preroll with axis error 0x%x, motor error 0x%x" % (axis.error, axis.motor.error))
+                return False
+                
+        return True
+        
+        
     def engage(self):
         if not self.driver:
             self.logger.error("Not connected.")
             return False
 
         self.logger.debug("Setting drive mode.")
-        self.driver.axis0.requested_state = AXIS_STATE_CLOSED_LOOP_CONTROL
-        self.driver.axis1.requested_state = AXIS_STATE_CLOSED_LOOP_CONTROL
-        
-        self.driver.axis0.controller.config.control_mode = CTRL_MODE_VELOCITY_CONTROL
-        self.driver.axis1.controller.config.control_mode = CTRL_MODE_VELOCITY_CONTROL
-        
-        self.driver.axis0.controller.vel_setpoint = 0
-        self.driver.axis1.controller.vel_setpoint = 0
+        for axis in self.axes:
+            axis.controller.vel_setpoint = 0
+            axis.requested_state = AXIS_STATE_CLOSED_LOOP_CONTROL
+            axis.controller.config.control_mode = CTRL_MODE_VELOCITY_CONTROL
         
         return True
         
@@ -186,8 +205,8 @@ class ODriveInterfaceAPI(object):
             self.logger.error("Not connected.")
             return
         self.logger.debug("Releasing.")
-        self.driver.axis0.requested_state = AXIS_STATE_IDLE
-        self.driver.axis1.requested_state = AXIS_STATE_IDLE
+        for axis in self.axes: 
+            axis.requested_state = AXIS_STATE_IDLE
     
     def drive(self, axis0_motor_val, axis1_motor_val):
         if not self.driver:
