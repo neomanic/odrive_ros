@@ -113,6 +113,10 @@ class ODriveInterfaceSerial(object):
 
 class ODriveInterfaceAPI(object):
     driver = None
+    encoder_cpr = 4096
+    right_axis = None
+    left_axis = None
+    connected = False
     
     def __init__(self, logger=None):
         self.logger = logger if logger else default_logger
@@ -120,7 +124,7 @@ class ODriveInterfaceAPI(object):
     def __del__(self):
         self.disconnect()
                     
-    def connect(self, port=None):
+    def connect(self, port=None, right_axis=0):
         if self.driver:
             self.logger.info("Already connected. Disconnecting and reconnecting.")
         
@@ -130,9 +134,20 @@ class ODriveInterfaceAPI(object):
         except:
             self.logger.error("No ODrive found. Is device powered?")
             return False
+            
+        # save some parameters for easy access
+        self.right_axis = self.driver.axis0 if right_axis == 0 else self.driver.axis1
+        self.left_axis  = self.driver.axis1 if right_axis == 0 else self.driver.axis0
+        self.encoder_cpr = self.driver.axis0.encoder.config.cpr
+        
+        self.connected = True
         return True
         
     def disconnect(self):
+        self.connected = False
+        self.right_axis = None
+        self.left_axis = None
+        
         if not self.driver:
             self.logger.error("Not connected.")
             return False
@@ -208,11 +223,11 @@ class ODriveInterfaceAPI(object):
         for axis in self.axes: 
             axis.requested_state = AXIS_STATE_IDLE
     
-    def drive(self, axis0_motor_val, axis1_motor_val):
+    def drive(self, left_motor_val, right_motor_val):
         if not self.driver:
             self.logger.error("Not connected.")
             return
             
-        self.driver.axis0.controller.vel_setpoint = -axis0_motor_val
-        self.driver.axis1.controller.vel_setpoint = axis1_motor_val
+        self.left_axis.controller.vel_setpoint = left_motor_val
+        self.right_axis.controller.vel_setpoint = -right_motor_val
 
