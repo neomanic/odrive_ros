@@ -67,6 +67,8 @@ class ODriveNode(object):
         
         self.has_preroll     = rospy.get_param('~use_preroll', True)
                 
+        self.publish_current = rospy.get_param('~publish_current', True)
+        
         rospy.on_shutdown(self.terminate)
 
         rospy.Service('connect_driver',    std_srvs.srv.Trigger, self.connect_driver)
@@ -80,6 +82,15 @@ class ODriveNode(object):
         
         self.timer = rospy.Timer(rospy.Duration(0.02), self.timer_check) # stop motors if no cmd_vel received > 1second
                 
+        if self.publish_current:
+            self.current_loop_count = 0
+            self.left_current_accumulator  = 0.0
+            self.right_current_accumulator = 0.0
+            self.current_timer = rospy.Timer(rospy.Duration(0.05), self.timer_current) # publish motor currents at 10Hz, read at 50Hz
+            self.current_publisher_left  = rospy.Publisher('odrive/left_current', Float64, queue_size=2)
+            self.current_publisher_right = rospy.Publisher('odrive/right_current', Float64, queue_size=2)
+            rospy.loginfo("ODrive will publish motor currents.")
+                    
         if not self.connect_on_startup:
             rospy.loginfo("ODrive node started, but not connected.")
             return
@@ -208,6 +219,26 @@ class ODriveNode(object):
         self.last_speed = max(abs(left_linear_val), abs(right_linear_val))
         self.last_cmd_vel_time = rospy.Time.now()
                 
+    def timer_current(self, event):
+        if not self.driver or not hasattr(self.driver, 'driver') or not hasattr(self.driver.driver, 'axis0'):
+            return
+        
+        self.left_current_accumulator += self.driver.left_axis.motor.current_control.Ibus
+        self.right_current_accumulator += self.driver.right_axis.motor.current_control.Ibus
+        
+        self.current_loop_count += 1
+        if self.current_loop_count >= 9:
+            # publish appropriate axis
+            self.current_publisher_left.publish(self.left_current_accumulator)
+            self.current_publisher_right.publish(self.right_current_accumulator)
+            
+            self.current_loop_count = 0
+            self.left_current_accumulator = 0.0
+            self.right_current_accumulator = 0.0
+        #self.current_timer = rospy.Timer(rospy.Duration(0.02), self.timer_current) # publish motor currents at 10Hz, read at 50Hz
+        #self.current_publisher_left  = rospy.Publisher('left_current', Float64, queue_size=2)
+        #self.current_publisher_right = rospy.Publisher('right_current', Float64, queue_size=2)
+        
     def timer_check(self, event):
         """Check for cmd_vel 1 sec timeout. """
         if not self.driver:
