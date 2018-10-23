@@ -7,6 +7,7 @@ import tf.transformations
 
 from std_msgs.msg import Float64
 from geometry_msgs.msg import Twist
+from nav_msgs.msg import Odometry
 import std_srvs.srv
 
 import time
@@ -69,6 +70,10 @@ class ODriveNode(object):
                 
         self.publish_current = rospy.get_param('~publish_current', True)
         
+        self.publish_odom    = rospy.get_param('~publish_odom', True)
+        self.odom_topic      = rospy.get_param('~odom_topic', "odom")
+        self.odom_frame      = rospy.get_param('~odom_frame', "base_link")
+        
         rospy.on_shutdown(self.terminate)
 
         rospy.Service('connect_driver',    std_srvs.srv.Trigger, self.connect_driver)
@@ -91,6 +96,28 @@ class ODriveNode(object):
             self.current_publisher_right = rospy.Publisher('odrive/right_current', Float64, queue_size=2)
             rospy.loginfo("ODrive will publish motor currents.")
                     
+        if self.publish_odom:
+            self.odom_publisher  = rospy.Publisher(self.odom_topic, Odometry, queue_size=2)
+            # setup message
+            self.odom_msg = Odometry()
+            #print(dir(self.odom_msg))
+            self.odom_msg.child_frame_id = self.odom_frame
+            self.odom_msg.pose.pose.position.z = 0.0    # always on the ground, we hope
+            self.odom_msg.pose.pose.orientation.x = 0.0 # always vertical
+            self.odom_msg.pose.pose.orientation.y = 0.0 # always vertical
+            self.odom_msg.twist.twist.linear.y = 0.0  # no sideways
+            self.odom_msg.twist.twist.linear.z = 0.0  # or upwards... only forward
+            self.odom_msg.twist.twist.angular.x = 0.0 # or roll
+            self.odom_msg.twist.twist.angular.y = 0.0 # or pitch... only yaw
+            
+            # store current location to be updated. 
+            self.x = 0.0
+            self.y = 0.0
+            self.theta = 0.0
+            
+            #TODO: variables
+            self.odom_timer = rospy.Timer(rospy.Duration(0.1), self.timer_odometry)
+        
         if not self.connect_on_startup:
             rospy.loginfo("ODrive node started, but not connected.")
             return
@@ -136,6 +163,10 @@ class ODriveNode(object):
         
         self.m_s_to_value = self.driver.encoder_cpr/self.tyre_circumference
                 
+        if self.publish_odom:
+            self.old_pos_l = self.driver.left_axis.encoder.pos_cpr
+            self.old_pos_r = self.driver.right_axis.encoder.pos_cpr
+        
         return (True, "ODrive connected successfully")
     
     def disconnect_driver(self, request):
@@ -238,6 +269,26 @@ class ODriveNode(object):
         #self.current_timer = rospy.Timer(rospy.Duration(0.02), self.timer_current) # publish motor currents at 10Hz, read at 50Hz
         #self.current_publisher_left  = rospy.Publisher('left_current', Float64, queue_size=2)
         #self.current_publisher_right = rospy.Publisher('right_current', Float64, queue_size=2)
+    
+    def timer_odometry(self, event):
+        #check for driver connected
+        if self.driver is None or not self.driver.connected:
+            return
+        # at ~10Hz, 
+        
+        # poll driver for each axis position and velocity PLL estimates
+        encoder_cpr = self.driver.encoder_cpr
+        wheel_track = self.wheel_track   # check these. Values in m
+        tyre_circumference = self.tyre_circumference
+        
+        vel_l = self.driver.left_axis.encoder.vel_estimate  # units: encoder counts/s
+        vel_r = -self.driver.right_axis.encoder.vel_estimate # neg is forward for right
+        
+        # TWIST: calculated from motor values only
+        self.odom_msg.twist.twist.linear.x = tyre_circumference * (vel_l+vel_r) / (2.0*encoder_cpr)
+        # angle: vel_r*tyre_radius - vel_l*tyre_radius
+        self.odom_msg.twist.twist.angular.z =  tyre_circumference * (vel_r-vel_l) / (wheel_track * encoder_cpr)
+        self.odom_publisher.publish(self.odom_msg)
         
     def timer_check(self, event):
         """Check for cmd_vel 1 sec timeout. """
