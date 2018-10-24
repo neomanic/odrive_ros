@@ -11,6 +11,7 @@ from nav_msgs.msg import Odometry
 import std_srvs.srv
 
 import time
+import math
 
 from odrive_interface import ODriveInterfaceSerial, ODriveInterfaceAPI
 
@@ -59,8 +60,8 @@ class ODriveNode(object):
     
     def __init__(self):
         self.axis_for_right = float(rospy.get_param('~axis_for_right', 0)) # if right calibrates first, this should be 0, else 1
-        self.wheel_track = float(rospy.get_param('~wheel_track', 0.3)) # m, distance between wheel centres
-        self.tyre_circumference = float(rospy.get_param('~tyre_circumference', 0.35)) # used to translate velocity commands in m/s into motor rpm
+        self.wheel_track = float(rospy.get_param('~wheel_track', 0.285)) # m, distance between wheel centres
+        self.tyre_circumference = float(rospy.get_param('~tyre_circumference', 0.341)) # used to translate velocity commands in m/s into motor rpm
         
         self.connect_on_startup   = rospy.get_param('~connect_on_startup', False)
         self.calibrate_on_startup = rospy.get_param('~calibrate_on_startup', False)
@@ -72,7 +73,8 @@ class ODriveNode(object):
         
         self.publish_odom    = rospy.get_param('~publish_odom', True)
         self.odom_topic      = rospy.get_param('~odom_topic', "odom")
-        self.odom_frame      = rospy.get_param('~odom_frame', "base_link")
+        self.odom_frame      = rospy.get_param('~odom_frame', "wheel_odom")
+        self.base_frame      = rospy.get_param('~base_frame', "base_link")
         
         rospy.on_shutdown(self.terminate)
 
@@ -101,7 +103,8 @@ class ODriveNode(object):
             # setup message
             self.odom_msg = Odometry()
             #print(dir(self.odom_msg))
-            self.odom_msg.child_frame_id = self.odom_frame
+            self.odom_msg.header.frame_id = self.odom_frame
+            self.odom_msg.child_frame_id = self.base_frame
             self.odom_msg.pose.pose.position.z = 0.0    # always on the ground, we hope
             self.odom_msg.pose.pose.orientation.x = 0.0 # always vertical
             self.odom_msg.pose.pose.orientation.y = 0.0 # always vertical
@@ -280,15 +283,76 @@ class ODriveNode(object):
         encoder_cpr = self.driver.encoder_cpr
         wheel_track = self.wheel_track   # check these. Values in m
         tyre_circumference = self.tyre_circumference
+        # self.m_s_to_value = encoder_cpr/tyre_circumference set earlier
         
         vel_l = self.driver.left_axis.encoder.vel_estimate  # units: encoder counts/s
         vel_r = -self.driver.right_axis.encoder.vel_estimate # neg is forward for right
         
-        # TWIST: calculated from motor values only
-        self.odom_msg.twist.twist.linear.x = tyre_circumference * (vel_l+vel_r) / (2.0*encoder_cpr)
-        # angle: vel_r*tyre_radius - vel_l*tyre_radius
-        self.odom_msg.twist.twist.angular.z =  tyre_circumference * (vel_r-vel_l) / (wheel_track * encoder_cpr)
+        # Twist: calculated from motor values only
+        s = tyre_circumference * (vel_l+vel_r) / (2.0*encoder_cpr)
+        w = tyre_circumference * (vel_r-vel_l) / (wheel_track * encoder_cpr) # angle: vel_r*tyre_radius - vel_l*tyre_radius
+        self.odom_msg.twist.twist.linear.x = s
+        self.odom_msg.twist.twist.angular.z = w
+        
+        rospy.loginfo("vel_l: % 2.2f  vel_r: % 2.2f  vel_l: % 2.2f  vel_r: % 2.2f  x: % 2.2f  th: % 2.2f  pos_l: % 5.1f pos_r: % 5.1f " % (
+                        vel_l, -vel_r,
+                        vel_l/encoder_cpr, vel_r/encoder_cpr, self.odom_msg.twist.twist.linear.x, self.odom_msg.twist.twist.angular.z,
+                        self.driver.left_axis.encoder.pos_cpr, self.driver.right_axis.encoder.pos_cpr))
+        
+        
+        new_pos_l = self.driver.left_axis.encoder.pos_cpr    # units: encoder counts
+        new_pos_r = -self.driver.right_axis.encoder.pos_cpr  # sign!
+        
+        delta_pos_l = new_pos_l - self.old_pos_l
+        delta_pos_r = new_pos_r - self.old_pos_r
+        
+        # Check for overflow. Assume we can't move more than half a circumference in a single timestep. 
+        half_cpr = encoder_cpr/2.0
+        if   delta_pos_l >  half_cpr: delta_pos_l = delta_pos_l - encoder_cpr
+        elif delta_pos_l < -half_cpr: delta_pos_l = delta_pos_l + encoder_cpr
+        if   delta_pos_r >  half_cpr: delta_pos_r = delta_pos_r - encoder_cpr
+        elif delta_pos_r < -half_cpr: delta_pos_r = delta_pos_r + encoder_cpr
+        
+        # counts to metres
+        delta_pos_l_m = delta_pos_l / self.m_s_to_value
+        delta_pos_r_m = delta_pos_r / self.m_s_to_value
+        
+        # Distance travelled
+        d = (delta_pos_l_m+delta_pos_r_m)/2.0  # delta_ps
+        th = (delta_pos_r_m-delta_pos_l_m)/wheel_track # works for small angles
+        
+        xd = math.cos(th)*d
+        yd = -math.sin(th)*d
+        
+        # elapsed time = event.last_real, event.current_real
+        elapsed = (event.current_real-event.last_real).to_sec()
+        # calc_vel: d/elapsed, th/elapsed
+        
+        # Pose: updated from previous pose + position delta
+        self.x += math.cos(self.theta)*xd - math.sin(self.theta)*yd
+        self.y += math.sin(self.theta)*xd + math.cos(self.theta)*yd
+        self.theta = (self.theta + th) % (2*math.pi)
+        
+        # fill odom message and publish
+        self.odom_msg.pose.pose.position.x = self.x
+        self.odom_msg.pose.pose.position.y = self.y
+        self.odom_msg.pose.pose.orientation.z = math.sin(self.theta)/2
+        self.odom_msg.pose.pose.orientation.w = math.cos(self.theta)/2
+        #self.odom_msg.pose.covariance
+         # x y z
+         # x y z
+         
         self.odom_publisher.publish(self.odom_msg)
+        
+        rospy.loginfo("dl_m: % 2.2f  dr_m: % 2.2f  d: % 2.2f  th: % 2.2f  xd: % 2.2f  yd: % 2.2f  x: % 5.1f y: % 5.1f  th: % 5.1f" % (
+                        delta_pos_l_m, delta_pos_r_m,
+                        d, th, xd, yd,
+                        self.x, self.y, self.theta
+                        ))
+        
+        
+        self.old_pos_l = new_pos_l
+        self.old_pos_r = new_pos_r
         
     def timer_check(self, event):
         """Check for cmd_vel 1 sec timeout. """
