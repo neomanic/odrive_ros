@@ -74,9 +74,11 @@ class ODriveNode(object):
         self.publish_current = rospy.get_param('~publish_current', True)
         
         self.publish_odom    = rospy.get_param('~publish_odom', True)
+        self.publish_tf      = rospy.get_param('~publish_odom_tf', False)
         self.odom_topic      = rospy.get_param('~odom_topic', "odom")
-        self.odom_frame      = rospy.get_param('~odom_frame', "wheel_odom")
+        self.odom_frame      = rospy.get_param('~odom_frame', "odom")
         self.base_frame      = rospy.get_param('~base_frame', "base_link")
+        self.odom_calc_hz    = rospy.get_param('~odom_calc_hz', 20)
         
         rospy.on_shutdown(self.terminate)
 
@@ -89,7 +91,7 @@ class ODriveNode(object):
 
         self.vel_subscribe = rospy.Subscriber("/cmd_vel", Twist, self.cmd_vel_callback, queue_size=2)
         
-        self.timer = rospy.Timer(rospy.Duration(0.02), self.timer_check) # stop motors if no cmd_vel received > 1second
+        self.timer = rospy.Timer(rospy.Duration(0.1), self.timer_check) # stop motors if no cmd_vel received > 1second
                 
         if self.publish_current:
             self.current_loop_count = 0
@@ -130,9 +132,8 @@ class ODriveNode(object):
             self.tf_msg.transform.translation.z = 0.0
             self.tf_msg.transform.rotation.x = 0.0
             self.tf_msg.transform.rotation.y = 0.0
-            
-            #TODO: variables
-            self.odom_timer = rospy.Timer(rospy.Duration(0.1), self.timer_odometry)
+
+            self.odom_timer = rospy.Timer(rospy.Duration(1/float(self.odom_calc_hz)), self.timer_odometry)
         
         if not self.connect_on_startup:
             rospy.loginfo("ODrive node started, but not connected.")
@@ -370,11 +371,11 @@ class ODriveNode(object):
         self.odom_msg.pose.pose.orientation.z = q[2] # math.sin(self.theta)/2
         self.odom_msg.pose.pose.orientation.w = q[3] # math.cos(self.theta)/2
         
-        rospy.loginfo("theta: % 2.2f  z_m: % 2.2f  w_m: % 2.2f  q[2]: % 2.2f  q[3]: % 2.2f (q[0]: %2.2f  q[1]: %2.2f)" % (
-                                self.theta,
-                                math.sin(self.theta)/2, math.cos(self.theta)/2,
-                                q[2],q[3],q[0],q[1]
-                                ))
+        #rospy.loginfo("theta: % 2.2f  z_m: % 2.2f  w_m: % 2.2f  q[2]: % 2.2f  q[3]: % 2.2f (q[0]: %2.2f  q[1]: %2.2f)" % (
+        #                        self.theta,
+        #                        math.sin(self.theta)/2, math.cos(self.theta)/2,
+        #                        q[2],q[3],q[0],q[1]
+        #                        ))
         
         #self.odom_msg.pose.covariance
          # x y z
@@ -390,8 +391,8 @@ class ODriveNode(object):
         
         # ... and publish!
         self.odom_publisher.publish(self.odom_msg)
-        self.tf_publisher.sendTransform(self.tf_msg)
-        
+        if self.publish_tf:
+            self.tf_publisher.sendTransform(self.tf_msg)
         
     def timer_check(self, event):
         """Check for cmd_vel 1 sec timeout. """
