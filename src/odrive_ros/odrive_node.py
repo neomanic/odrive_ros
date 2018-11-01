@@ -69,6 +69,11 @@ class ODriveNode(object):
         self.calibrate_on_startup = rospy.get_param('~calibrate_on_startup', False)
         self.engage_on_startup    = rospy.get_param('~engage_on_startup', False)
         
+        self.max_speed   = rospy.get_param('~max_speed', 0.5)
+        self.max_angular = rospy.get_param('~max_angular', 1.0) 
+        
+        self.publish_current = rospy.get_param('~publish_current', True)
+        
         self.has_preroll     = rospy.get_param('~use_preroll', True)
                 
         self.publish_current = rospy.get_param('~publish_current', True)
@@ -234,7 +239,6 @@ class ODriveNode(object):
     # Helpers and callbacks
     
     def convert(self, forward, ccw):
-        
         angular_to_linear = ccw * (self.wheel_track/2.0) 
         left_linear_val  = int((forward - angular_to_linear) * self.m_s_to_value)
         right_linear_val = int((forward + angular_to_linear) * self.m_s_to_value)
@@ -256,7 +260,11 @@ class ODriveNode(object):
         #angular_to_linear = msg.angular.z * (wheel_track/2.0) 
         #left_linear_rpm  = (msg.linear.x - angular_to_linear) * m_s_to_erpm
         #right_linear_rpm = (msg.linear.x + angular_to_linear) * m_s_to_erpm
-        left_linear_val, right_linear_val = self.convert(msg.linear.x, msg.angular.z)
+        
+        x = max(min(msg.linear.x, self.max_speed),   -self.max_speed)
+        z = max(min(msg.linear.x, self.max_angular), -self.max_angular)
+        
+        left_linear_val, right_linear_val = self.convert(x,z)
         
         # if wheel speed = 0, stop publishing after sending 0 once. #TODO add error term, work out why VESC turns on for 0 rpm
         if self.last_speed == 0 and abs(left_linear_val) == 0 and abs(right_linear_val) == 0:
