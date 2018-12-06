@@ -69,11 +69,6 @@ class ODriveNode(object):
         self.calibrate_on_startup = rospy.get_param('~calibrate_on_startup', False)
         self.engage_on_startup    = rospy.get_param('~engage_on_startup', False)
         
-        self.max_speed   = rospy.get_param('~max_speed', 0.5)
-        self.max_angular = rospy.get_param('~max_angular', 1.0) 
-        
-        self.publish_current = rospy.get_param('~publish_current', True)
-        
         self.has_preroll     = rospy.get_param('~use_preroll', True)
                 
         self.publish_current = rospy.get_param('~publish_current', True)
@@ -83,7 +78,7 @@ class ODriveNode(object):
         self.odom_topic      = rospy.get_param('~odom_topic', "odom")
         self.odom_frame      = rospy.get_param('~odom_frame', "odom")
         self.base_frame      = rospy.get_param('~base_frame', "base_link")
-        self.odom_calc_hz    = rospy.get_param('~odom_calc_hz', 20)
+        self.odom_calc_hz    = rospy.get_param('~odom_calc_hz', 50)
         
         rospy.on_shutdown(self.terminate)
 
@@ -116,13 +111,19 @@ class ODriveNode(object):
             #print(dir(self.odom_msg))
             self.odom_msg.header.frame_id = self.odom_frame
             self.odom_msg.child_frame_id = self.base_frame
+            self.odom_msg.pose.pose.position.x = 0.0
+            self.odom_msg.pose.pose.position.y = 0.0
             self.odom_msg.pose.pose.position.z = 0.0    # always on the ground, we hope
             self.odom_msg.pose.pose.orientation.x = 0.0 # always vertical
             self.odom_msg.pose.pose.orientation.y = 0.0 # always vertical
+            self.odom_msg.pose.pose.orientation.z = 0.0
+            self.odom_msg.pose.pose.orientation.w = 0.0
+            self.odom_msg.twist.twist.linear.x = 0.0
             self.odom_msg.twist.twist.linear.y = 0.0  # no sideways
             self.odom_msg.twist.twist.linear.z = 0.0  # or upwards... only forward
             self.odom_msg.twist.twist.angular.x = 0.0 # or roll
             self.odom_msg.twist.twist.angular.y = 0.0 # or pitch... only yaw
+            self.odom_msg.twist.twist.angular.z = 0.0
             
             # store current location to be updated. 
             self.x = 0.0
@@ -134,9 +135,14 @@ class ODriveNode(object):
             self.tf_msg = TransformStamped()
             self.tf_msg.header.frame_id = self.odom_frame
             self.tf_msg.child_frame_id  = self.base_frame
+            self.tf_msg.transform.translation.x = 0.0
+            self.tf_msg.transform.translation.y = 0.0
             self.tf_msg.transform.translation.z = 0.0
             self.tf_msg.transform.rotation.x = 0.0
             self.tf_msg.transform.rotation.y = 0.0
+            self.tf_msg.transform.rotation.w = 0.0
+            self.tf_msg.transform.rotation.z = 0.0
+            
 
             self.odom_timer = rospy.Timer(rospy.Duration(1/float(self.odom_calc_hz)), self.timer_odometry)
         
@@ -239,6 +245,7 @@ class ODriveNode(object):
     # Helpers and callbacks
     
     def convert(self, forward, ccw):
+        
         angular_to_linear = ccw * (self.wheel_track/2.0) 
         left_linear_val  = int((forward - angular_to_linear) * self.m_s_to_value)
         right_linear_val = int((forward + angular_to_linear) * self.m_s_to_value)
@@ -260,11 +267,7 @@ class ODriveNode(object):
         #angular_to_linear = msg.angular.z * (wheel_track/2.0) 
         #left_linear_rpm  = (msg.linear.x - angular_to_linear) * m_s_to_erpm
         #right_linear_rpm = (msg.linear.x + angular_to_linear) * m_s_to_erpm
-        
-        x = max(min(msg.linear.x, self.max_speed),   -self.max_speed)
-        z = max(min(msg.linear.x, self.max_angular), -self.max_angular)
-        
-        left_linear_val, right_linear_val = self.convert(x,z)
+        left_linear_val, right_linear_val = self.convert(msg.linear.x, msg.angular.z)
         
         # if wheel speed = 0, stop publishing after sending 0 once. #TODO add error term, work out why VESC turns on for 0 rpm
         if self.last_speed == 0 and abs(left_linear_val) == 0 and abs(right_linear_val) == 0:
@@ -303,99 +306,103 @@ class ODriveNode(object):
         #self.current_publisher_right = rospy.Publisher('right_current', Float64, queue_size=2)
     
     def timer_odometry(self, event):
+        now = rospy.Time.now()
+        self.odom_msg.header.stamp = now
+        self.tf_msg.header.stamp = now
+        
         #check for driver connected
         if self.driver is None or not self.driver.connected:
-            return
-        # at ~10Hz, 
+            # publish same odometry position, but no velocity
+            self.odom_msg.twist.twist.linear.x = 0.0
+            self.odom_msg.twist.twist.angular.z = 0.0
+        else:
+            # poll driver for each axis position and velocity PLL estimates
+            encoder_cpr = self.driver.encoder_cpr
+            wheel_track = self.wheel_track   # check these. Values in m
+            tyre_circumference = self.tyre_circumference
+            # self.m_s_to_value = encoder_cpr/tyre_circumference set earlier
         
-        # poll driver for each axis position and velocity PLL estimates
-        encoder_cpr = self.driver.encoder_cpr
-        wheel_track = self.wheel_track   # check these. Values in m
-        tyre_circumference = self.tyre_circumference
-        # self.m_s_to_value = encoder_cpr/tyre_circumference set earlier
+            # get values from ODrive
         
-        # get values from ODrive
-        odrive_poll_time = rospy.Time.now()
-        vel_l = self.driver.left_axis.encoder.vel_estimate  # units: encoder counts/s
-        vel_r = -self.driver.right_axis.encoder.vel_estimate # neg is forward for right
-        new_pos_l = self.driver.left_axis.encoder.pos_cpr    # units: encoder counts
-        new_pos_r = -self.driver.right_axis.encoder.pos_cpr  # sign!
+            vel_l = self.driver.left_axis.encoder.vel_estimate  # units: encoder counts/s
+            vel_r = -self.driver.right_axis.encoder.vel_estimate # neg is forward for right
+            new_pos_l = self.driver.left_axis.encoder.pos_cpr    # units: encoder counts
+            new_pos_r = -self.driver.right_axis.encoder.pos_cpr  # sign!
         
-        # Twist: calculated from motor values only
-        s = tyre_circumference * (vel_l+vel_r) / (2.0*encoder_cpr)
-        w = tyre_circumference * (vel_r-vel_l) / (wheel_track * encoder_cpr) # angle: vel_r*tyre_radius - vel_l*tyre_radius
-        self.odom_msg.twist.twist.linear.x = s
-        self.odom_msg.twist.twist.angular.z = w
+            # Twist: calculated from motor values only
+            s = tyre_circumference * (vel_l+vel_r) / (2.0*encoder_cpr)
+            w = tyre_circumference * (vel_r-vel_l) / (wheel_track * encoder_cpr) # angle: vel_r*tyre_radius - vel_l*tyre_radius
+            self.odom_msg.twist.twist.linear.x = s
+            self.odom_msg.twist.twist.angular.z = w
         
-        #rospy.loginfo("vel_l: % 2.2f  vel_r: % 2.2f  vel_l: % 2.2f  vel_r: % 2.2f  x: % 2.2f  th: % 2.2f  pos_l: % 5.1f pos_r: % 5.1f " % (
-        #                vel_l, -vel_r,
-        #                vel_l/encoder_cpr, vel_r/encoder_cpr, self.odom_msg.twist.twist.linear.x, self.odom_msg.twist.twist.angular.z,
-        #                self.driver.left_axis.encoder.pos_cpr, self.driver.right_axis.encoder.pos_cpr))
+            #rospy.loginfo("vel_l: % 2.2f  vel_r: % 2.2f  vel_l: % 2.2f  vel_r: % 2.2f  x: % 2.2f  th: % 2.2f  pos_l: % 5.1f pos_r: % 5.1f " % (
+            #                vel_l, -vel_r,
+            #                vel_l/encoder_cpr, vel_r/encoder_cpr, self.odom_msg.twist.twist.linear.x, self.odom_msg.twist.twist.angular.z,
+            #                self.driver.left_axis.encoder.pos_cpr, self.driver.right_axis.encoder.pos_cpr))
         
-        delta_pos_l = new_pos_l - self.old_pos_l
-        delta_pos_r = new_pos_r - self.old_pos_r
+            delta_pos_l = new_pos_l - self.old_pos_l
+            delta_pos_r = new_pos_r - self.old_pos_r
         
-        self.old_pos_l = new_pos_l
-        self.old_pos_r = new_pos_r
+            self.old_pos_l = new_pos_l
+            self.old_pos_r = new_pos_r
         
-        # Check for overflow. Assume we can't move more than half a circumference in a single timestep. 
-        half_cpr = encoder_cpr/2.0
-        if   delta_pos_l >  half_cpr: delta_pos_l = delta_pos_l - encoder_cpr
-        elif delta_pos_l < -half_cpr: delta_pos_l = delta_pos_l + encoder_cpr
-        if   delta_pos_r >  half_cpr: delta_pos_r = delta_pos_r - encoder_cpr
-        elif delta_pos_r < -half_cpr: delta_pos_r = delta_pos_r + encoder_cpr
+            # Check for overflow. Assume we can't move more than half a circumference in a single timestep. 
+            half_cpr = encoder_cpr/2.0
+            if   delta_pos_l >  half_cpr: delta_pos_l = delta_pos_l - encoder_cpr
+            elif delta_pos_l < -half_cpr: delta_pos_l = delta_pos_l + encoder_cpr
+            if   delta_pos_r >  half_cpr: delta_pos_r = delta_pos_r - encoder_cpr
+            elif delta_pos_r < -half_cpr: delta_pos_r = delta_pos_r + encoder_cpr
         
-        # counts to metres
-        delta_pos_l_m = delta_pos_l / self.m_s_to_value
-        delta_pos_r_m = delta_pos_r / self.m_s_to_value
+            # counts to metres
+            delta_pos_l_m = delta_pos_l / self.m_s_to_value
+            delta_pos_r_m = delta_pos_r / self.m_s_to_value
         
-        # Distance travelled
-        d = (delta_pos_l_m+delta_pos_r_m)/2.0  # delta_ps
-        th = (delta_pos_r_m-delta_pos_l_m)/wheel_track # works for small angles
+            # Distance travelled
+            d = (delta_pos_l_m+delta_pos_r_m)/2.0  # delta_ps
+            th = (delta_pos_r_m-delta_pos_l_m)/wheel_track # works for small angles
         
-        xd = math.cos(th)*d
-        yd = -math.sin(th)*d
+            xd = math.cos(th)*d
+            yd = -math.sin(th)*d
         
-        # elapsed time = event.last_real, event.current_real
-        elapsed = (event.current_real-event.last_real).to_sec()
-        # calc_vel: d/elapsed, th/elapsed
+            # elapsed time = event.last_real, event.current_real
+            elapsed = (event.current_real-event.last_real).to_sec()
+            # calc_vel: d/elapsed, th/elapsed
         
-        # Pose: updated from previous pose + position delta
-        self.x += math.cos(self.theta)*xd - math.sin(self.theta)*yd
-        self.y += math.sin(self.theta)*xd + math.cos(self.theta)*yd
-        self.theta = (self.theta + th) % (2*math.pi)
+            # Pose: updated from previous pose + position delta
+            self.x += math.cos(self.theta)*xd - math.sin(self.theta)*yd
+            self.y += math.sin(self.theta)*xd + math.cos(self.theta)*yd
+            self.theta = (self.theta + th) % (2*math.pi)
         
-        #rospy.loginfo("dl_m: % 2.2f  dr_m: % 2.2f  d: % 2.2f  th: % 2.2f  xd: % 2.2f  yd: % 2.2f  x: % 5.1f y: % 5.1f  th: % 5.1f" % (
-        #                delta_pos_l_m, delta_pos_r_m,
-        #                d, th, xd, yd,
-        #                self.x, self.y, self.theta
-        #                ))
+            #rospy.loginfo("dl_m: % 2.2f  dr_m: % 2.2f  d: % 2.2f  th: % 2.2f  xd: % 2.2f  yd: % 2.2f  x: % 5.1f y: % 5.1f  th: % 5.1f" % (
+            #                delta_pos_l_m, delta_pos_r_m,
+            #                d, th, xd, yd,
+            #                self.x, self.y, self.theta
+            #                ))
         
-        # fill odom message and publish
-        self.odom_msg.header.stamp = odrive_poll_time
-        self.odom_msg.pose.pose.position.x = self.x
-        self.odom_msg.pose.pose.position.y = self.y
-        q = tf_conversions.transformations.quaternion_from_euler(0.0, 0.0, self.theta)
-        self.odom_msg.pose.pose.orientation.z = q[2] # math.sin(self.theta)/2
-        self.odom_msg.pose.pose.orientation.w = q[3] # math.cos(self.theta)/2
+            # fill odom message and publish
+            
+            self.odom_msg.pose.pose.position.x = self.x
+            self.odom_msg.pose.pose.position.y = self.y
+            q = tf_conversions.transformations.quaternion_from_euler(0.0, 0.0, self.theta)
+            self.odom_msg.pose.pose.orientation.z = q[2] # math.sin(self.theta)/2
+            self.odom_msg.pose.pose.orientation.w = q[3] # math.cos(self.theta)/2
         
-        #rospy.loginfo("theta: % 2.2f  z_m: % 2.2f  w_m: % 2.2f  q[2]: % 2.2f  q[3]: % 2.2f (q[0]: %2.2f  q[1]: %2.2f)" % (
-        #                        self.theta,
-        #                        math.sin(self.theta)/2, math.cos(self.theta)/2,
-        #                        q[2],q[3],q[0],q[1]
-        #                        ))
+            #rospy.loginfo("theta: % 2.2f  z_m: % 2.2f  w_m: % 2.2f  q[2]: % 2.2f  q[3]: % 2.2f (q[0]: %2.2f  q[1]: %2.2f)" % (
+            #                        self.theta,
+            #                        math.sin(self.theta)/2, math.cos(self.theta)/2,
+            #                        q[2],q[3],q[0],q[1]
+            #                        ))
         
-        #self.odom_msg.pose.covariance
-         # x y z
-         # x y z
+            #self.odom_msg.pose.covariance
+             # x y z
+             # x y z
         
-        self.tf_msg.header.stamp = odrive_poll_time
-        self.tf_msg.transform.translation.x = self.x
-        self.tf_msg.transform.translation.y = self.y
-        #self.tf_msg.transform.rotation.x
-        #self.tf_msg.transform.rotation.x
-        self.tf_msg.transform.rotation.z = q[2]
-        self.tf_msg.transform.rotation.w = q[3]
+            self.tf_msg.transform.translation.x = self.x
+            self.tf_msg.transform.translation.y = self.y
+            #self.tf_msg.transform.rotation.x
+            #self.tf_msg.transform.rotation.x
+            self.tf_msg.transform.rotation.z = q[2]
+            self.tf_msg.transform.rotation.w = q[3]
         
         # ... and publish!
         self.odom_publisher.publish(self.odom_msg)
