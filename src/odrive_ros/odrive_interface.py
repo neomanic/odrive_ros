@@ -4,9 +4,12 @@ from serial.serialutil import SerialException
 import sys
 import time
 import logging
+import traceback
 
 import odrive
 from odrive.enums import *
+
+import fibre
 
 default_logger = logging.getLogger(__name__)
 default_logger.setLevel(logging.DEBUG)
@@ -16,6 +19,9 @@ ch = logging.StreamHandler()
 ch.setLevel(logging.DEBUG)
 
 default_logger.addHandler(ch)
+
+class ODriveFailure(Exception):
+    pass
 
 class ODriveInterfaceSerial(object):
     port = None
@@ -152,12 +158,13 @@ class ODriveInterfaceAPI(object):
             self.logger.error("Not connected.")
             return False
         
-        temp_driver = self.driver
-        self.driver = None
         try:
-            temp_driver.release()
+            self.driver.release()
         except:
+            self.logger.error("Error in timer: " + traceback.format_exc())
             return False
+        finally:
+            self.driver = None
         return True
 
     def calibrate(self):
@@ -218,16 +225,19 @@ class ODriveInterfaceAPI(object):
     def release(self):
         if not self.driver:
             self.logger.error("Not connected.")
-            return
+            return False
         self.logger.debug("Releasing.")
         for axis in self.axes: 
             axis.requested_state = AXIS_STATE_IDLE
+        return True
     
     def drive(self, left_motor_val, right_motor_val):
         if not self.driver:
             self.logger.error("Not connected.")
             return
-            
+        #try:
         self.left_axis.controller.vel_setpoint = left_motor_val
         self.right_axis.controller.vel_setpoint = -right_motor_val
+        #except (fibre.protocol.ChannelBrokenException, AttributeError) as e:
+        #    raise ODriveFailure(str(e))
 
