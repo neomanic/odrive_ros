@@ -7,7 +7,7 @@ import tf.transformations
 import tf_conversions
 import tf2_ros
 
-from std_msgs.msg import Float64
+from std_msgs.msg import Float64, Int32
 from geometry_msgs.msg import Twist, TransformStamped
 from nav_msgs.msg import Odometry
 import std_srvs.srv
@@ -61,10 +61,6 @@ class ODriveNode(object):
     calibrate_on_startup = False
     engage_on_startup = False
     
-    # odometry calc variables
-    old_pos_l = 0
-    old_pos_r = 0
-    
     def __init__(self):
         self.axis_for_right = float(rospy.get_param('~axis_for_right', 0)) # if right calibrates first, this should be 0, else 1
         self.wheel_track = float(rospy.get_param('~wheel_track', 0.285)) # m, distance between wheel centres
@@ -77,6 +73,7 @@ class ODriveNode(object):
         self.has_preroll     = rospy.get_param('~use_preroll', True)
                 
         self.publish_current = rospy.get_param('~publish_current', True)
+        self.publish_raw_odom =rospy.get_param('~publish_raw_odom', True)
         
         self.publish_odom    = rospy.get_param('~publish_odom', True)
         self.publish_tf      = rospy.get_param('~publish_odom_tf', False)
@@ -104,11 +101,18 @@ class ODriveNode(object):
             self.current_publisher_left  = rospy.Publisher('odrive/left_current', Float64, queue_size=2)
             self.current_publisher_right = rospy.Publisher('odrive/right_current', Float64, queue_size=2)
             rospy.loginfo("ODrive will publish motor currents.")
-                    
+            
+        self.raw_odom_publisher_encoder_left  = rospy.Publisher('odrive/raw_odom/encoder_left',   Int32, queue_size=2) if self.publish_raw_odom else None
+        self.raw_odom_publisher_encoder_right = rospy.Publisher('odrive/raw_odom/encoder_right',  Int32, queue_size=2) if self.publish_raw_odom else None
+        self.raw_odom_publisher_vel_left      = rospy.Publisher('odrive/raw_odom/velocity_left',  Int32, queue_size=2) if self.publish_raw_odom else None
+        self.raw_odom_publisher_vel_right     = rospy.Publisher('odrive/raw_odom/velocity_right', Int32, queue_size=2) if self.publish_raw_odom else None
+                            
         if self.publish_odom:
             rospy.Service('reset_odometry',    std_srvs.srv.Trigger, self.reset_odometry)
-
-            self.odom_publisher  = rospy.Publisher(self.odom_topic, Odometry, queue_size=2)
+            self.old_pos_l = 0
+            self.old_pos_r = 0
+            
+            self.odom_publisher  = rospy.Publisher(self.odom_topic, Odometry, tcp_nodelay=True, queue_size=2)
             # setup message
             self.odom_msg = Odometry()
             #print(dir(self.odom_msg))
@@ -434,11 +438,17 @@ class ODriveNode(object):
             #self.tf_msg.transform.rotation.x
             self.tf_msg.transform.rotation.z = q[2]
             self.tf_msg.transform.rotation.w = q[3]
+            
+            if self.publish_raw_odom:
+                self.raw_odom_publisher_encoder_left.publish(self.new_pos_l)
+                self.raw_odom_publisher_encoder_right.publish(self.new_pos_r)
+                self.raw_odom_publisher_vel_left.publish(self.vel_l)
+                self.raw_odom_publisher_vel_right.publish(self.vel_r)
         
         # ... and publish!
         self.odom_publisher.publish(self.odom_msg)
         if self.publish_tf:
-            self.tf_publisher.sendTransform(self.tf_msg)
+            self.tf_publisher.sendTransform(self.tf_msg)            
         
     def timer_check(self, event):
         """Check for cmd_vel 1 sec timeout. """
