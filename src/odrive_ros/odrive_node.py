@@ -61,6 +61,10 @@ class ODriveNode(object):
     calibrate_on_startup = False
     engage_on_startup = False
     
+    # odometry calc variables
+    old_pos_l = 0
+    old_pos_r = 0
+    
     def __init__(self):
         self.axis_for_right = float(rospy.get_param('~axis_for_right', 0)) # if right calibrates first, this should be 0, else 1
         self.wheel_track = float(rospy.get_param('~wheel_track', 0.285)) # m, distance between wheel centres
@@ -103,9 +107,7 @@ class ODriveNode(object):
                     
         if self.publish_odom:
             rospy.Service('reset_odometry',    std_srvs.srv.Trigger, self.reset_odometry)
-            self.old_pos_l = 0
-            self.old_pos_r = 0
-            
+
             self.odom_publisher  = rospy.Publisher(self.odom_topic, Odometry, queue_size=2)
             # setup message
             self.odom_msg = Odometry()

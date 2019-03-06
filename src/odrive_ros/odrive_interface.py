@@ -147,6 +147,11 @@ class ODriveInterfaceAPI(object):
         self.encoder_cpr = self.driver.axis0.encoder.config.cpr
         
         self.connected = True
+        self.logger.info("Connected to ODrive. Hardware v%d.%d-%d, firmware v%d.%d.%d%s" % (
+                        self.driver.hw_version_major, self.driver.hw_version_minor, self.driver.hw_version_variant,
+                        self.driver.fw_version_major, self.driver.fw_version_minor, self.driver.fw_version_revision,
+                        "-dev" if self.driver.fw_version_unreleased else ""
+                        ))
         return True
         
     def disconnect(self):
