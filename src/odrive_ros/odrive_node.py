@@ -190,7 +190,7 @@ class ODriveNode(object):
         self.driver = ODriveInterfaceAPI(logger=ROSLogger())
         rospy.loginfo("Connecting to ODrive...")
         if not self.driver.connect(right_axis=self.axis_for_right):
-            self.driver = False
+            self.driver = None
             rospy.logerr("Failed to connect.")
             return (False, "Failed to connect.")
             
