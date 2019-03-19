@@ -202,27 +202,6 @@ class ODriveNode(object):
             
             else:
                 pass # loop around and try again
-
-            #
-            # if not self.calibrate_on_startup:
-            #     rospy.loginfo("ODrive node started and connected. Not calibrated.")
-            #     return
-            #
-            # if not self.calibrate_motor(None)[0]:
-            #     return
-            #
-            # if not self.engage_on_startup:
-            #     rospy.loginfo("ODrive connected and configured. Engage to drive.")
-            #     return
-            #
-            # if not self.engage_motor(None)[0]:
-            #     return
-            #
-            # rospy.loginfo("ODrive connected and configured. Ready to drive.")
-            #
-            
-            
-            
         
     def fast_timer(self, timer_event):
         time_now = rospy.Time.now()
@@ -259,7 +238,7 @@ class ODriveNode(object):
         if self.publish_odom:
             self.publish_odometry(time_now)
         if self.publish_current:
-            self.publish_current(time_now)
+            self.pub_current()
             
         # check and stop motor if no vel command has been received in > 1s
         try:
@@ -435,7 +414,7 @@ class ODriveNode(object):
             
         self.last_cmd_vel_time = rospy.Time.now()
                 
-    def publish_current(self):
+    def pub_current(self):
         current_quantizer = 10
         
         self.left_current_accumulator += self.current_l
