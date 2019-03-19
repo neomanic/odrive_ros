@@ -15,6 +15,7 @@ import std_srvs.srv
 import time
 import math
 import traceback
+import Queue
 
 from odrive_interface import ODriveInterfaceAPI, ODriveFailure
 
@@ -47,19 +48,21 @@ class ROSLogger(object):
 class ODriveNode(object):
     last_speed = 0.0
     driver = None
-    last_cmd_vel_time = None
+    prerolling = False
     
     # Robot wheel_track params for velocity -> motor speed conversion
     wheel_track = None
     tyre_circumference = None
     encoder_counts_per_rev = None
-    m_s_to_value = 0
+    m_s_to_value = 1.0
     axis_for_right = 0
+    encoder_cpr = 4096
     
     # Startup parameters
     connect_on_startup = False
     calibrate_on_startup = False
     engage_on_startup = False
+
     
     def __init__(self):
         self.axis_for_right = float(rospy.get_param('~axis_for_right', 0)) # if right calibrates first, this should be 0, else 1
@@ -67,8 +70,8 @@ class ODriveNode(object):
         self.tyre_circumference = float(rospy.get_param('~tyre_circumference', 0.341)) # used to translate velocity commands in m/s into motor rpm
         
         self.connect_on_startup   = rospy.get_param('~connect_on_startup', False)
-        self.calibrate_on_startup = rospy.get_param('~calibrate_on_startup', False)
-        self.engage_on_startup    = rospy.get_param('~engage_on_startup', False)
+        #self.calibrate_on_startup = rospy.get_param('~calibrate_on_startup', False)
+        #self.engage_on_startup    = rospy.get_param('~engage_on_startup', False)
         
         self.has_preroll     = rospy.get_param('~use_preroll', True)
                 
@@ -91,21 +94,25 @@ class ODriveNode(object):
         rospy.Service('engage_motors',     std_srvs.srv.Trigger, self.engage_motor)
         rospy.Service('release_motors',    std_srvs.srv.Trigger, self.release_motor)
         
-        self.timer = rospy.Timer(rospy.Duration(0.1), self.timer_check) # stop motors if no cmd_vel received > 1second
-                
-        if self.publish_current:
-            self.current_loop_count = 0
-            self.left_current_accumulator  = 0.0
-            self.right_current_accumulator = 0.0
-            self.current_timer = rospy.Timer(rospy.Duration(0.05), self.timer_current) # publish motor currents at 10Hz, read at 50Hz
-            self.current_publisher_left  = rospy.Publisher('odrive/left_current', Float64, queue_size=2)
-            self.current_publisher_right = rospy.Publisher('odrive/right_current', Float64, queue_size=2)
-            rospy.loginfo("ODrive will publish motor currents.")
-            
-        self.raw_odom_publisher_encoder_left  = rospy.Publisher('odrive/raw_odom/encoder_left',   Int32, queue_size=2) if self.publish_raw_odom else None
-        self.raw_odom_publisher_encoder_right = rospy.Publisher('odrive/raw_odom/encoder_right',  Int32, queue_size=2) if self.publish_raw_odom else None
-        self.raw_odom_publisher_vel_left      = rospy.Publisher('odrive/raw_odom/velocity_left',  Int32, queue_size=2) if self.publish_raw_odom else None
-        self.raw_odom_publisher_vel_right     = rospy.Publisher('odrive/raw_odom/velocity_right', Int32, queue_size=2) if self.publish_raw_odom else None
+        self.command_queue = Queue.Queue(maxsize=5)
+        self.vel_subscribe = rospy.Subscriber("/cmd_vel", Twist, self.cmd_vel_callback, queue_size=2)
+        
+        # if self.publish_current:
+        #     self.current_loop_count = 0
+        #     self.left_current_accumulator  = 0.0
+        #     self.right_current_accumulator = 0.0
+        #     self.current_timer = rospy.Timer(rospy.Duration(0.05), self.timer_current) # publish motor currents at 10Hz, read at 50Hz
+        #     self.current_publisher_left  = rospy.Publisher('odrive/left_current', Float64, queue_size=2)
+        #     self.current_publisher_right = rospy.Publisher('odrive/right_current', Float64, queue_size=2)
+        #     rospy.loginfo("ODrive will publish motor currents.")
+        
+        self.last_cmd_vel_time = rospy.Time.now()
+        
+        if self.publish_raw_odom:
+            self.raw_odom_publisher_encoder_left  = rospy.Publisher('odrive/raw_odom/encoder_left',   Int32, queue_size=2) if self.publish_raw_odom else None
+            self.raw_odom_publisher_encoder_right = rospy.Publisher('odrive/raw_odom/encoder_right',  Int32, queue_size=2) if self.publish_raw_odom else None
+            self.raw_odom_publisher_vel_left      = rospy.Publisher('odrive/raw_odom/velocity_left',  Int32, queue_size=2) if self.publish_raw_odom else None
+            self.raw_odom_publisher_vel_right     = rospy.Publisher('odrive/raw_odom/velocity_right', Int32, queue_size=2) if self.publish_raw_odom else None
                             
         if self.publish_odom:
             rospy.Service('reset_odometry',    std_srvs.srv.Trigger, self.reset_odometry)
@@ -149,59 +156,188 @@ class ODriveNode(object):
             self.tf_msg.transform.rotation.y = 0.0
             self.tf_msg.transform.rotation.w = 0.0
             self.tf_msg.transform.rotation.z = 1.0
-            
 
-            self.odom_timer = rospy.Timer(rospy.Duration(1/float(self.odom_calc_hz)), self.timer_odometry)
         
-        if not self.connect_on_startup:
-            rospy.loginfo("ODrive node started, but not connected.")
-            return
+    def main_loop(self):
+        # Main control, handle startup and error handling
+        # while a ROS timer will handle the high-rate (~50Hz) comms + odometry calcs
+        main_rate = rospy.Rate(1) # hz
+        # Start timer to run high-rate comms
+        self.fast_timer = rospy.Timer(rospy.Duration(1/float(self.odom_calc_hz)), self.fast_timer)
         
-        if not self.connect_driver(None)[0]:
-            return # Failed to connect
+        self.fast_timer_comms_active = False
         
-        if not self.calibrate_on_startup:
-            rospy.loginfo("ODrive node started and connected. Not calibrated.")
-            return
-        
-        if not self.calibrate_motor(None)[0]:
-            return
+        while not rospy.is_shutdown():
+            try:
+                main_rate.sleep()
+            except rospy.ROSInterruptException: # shutdown / stop ODrive??
+                break;
             
-        if not self.engage_on_startup:
-            rospy.loginfo("ODrive connected and configured. Engage to drive.")
-            return
+            # fast timer running, so do nothing and wait for any errors
+            if self.fast_timer_comms_active:
+                continue
+            
+            # check for errors
+            if self.driver:
+                try:
+                    # driver connected, but fast_comms not active -> must be an error?
+                    if self.driver.get_errors(clear=True):
+                        rospy.logerr("Had errors, disconnecting and retrying connection.")
+                        self.driver.disconnect()
+                        self.driver = None
+                    else:
+                        # must have called connect service from another node
+                        self.fast_timer_comms_active = True
+                except:
+                    rospy.logerr("Errors accessing ODriver:" + traceback.format_exc())
+                    self.driver = None
+            
+            if not self.driver:
+                if not self.connect_on_startup:
+                    #rospy.loginfo("ODrive node started, but not connected.")
+                    continue
+                
+                if not self.connect_driver(None)[0]:
+                    rospy.logerr("Failed to connect.") # TODO: can we check for timeout here?
+                    continue
+            
+            else:
+                pass # loop around and try again
+
+            #
+            # if not self.calibrate_on_startup:
+            #     rospy.loginfo("ODrive node started and connected. Not calibrated.")
+            #     return
+            #
+            # if not self.calibrate_motor(None)[0]:
+            #     return
+            #
+            # if not self.engage_on_startup:
+            #     rospy.loginfo("ODrive connected and configured. Engage to drive.")
+            #     return
+            #
+            # if not self.engage_motor(None)[0]:
+            #     return
+            #
+            # rospy.loginfo("ODrive connected and configured. Ready to drive.")
+            #
+            
+            
+            
         
-        if not self.engage_motor(None)[0]:
-            return
+    def fast_timer(self, timer_event):
+        time_now = rospy.Time.now()
+        # in case of failure, assume some values are zero
+        self.vel_l = 0
+        self.vel_r = 0
+        self.new_pos_l = 0
+        self.new_pos_r = 0
+        self.current_l = 0
+        self.current_r = 0
         
-        rospy.loginfo("ODrive connected and configured. Ready to drive.")
+        # Handle reading from Odrive and sending odometry
+        if self.fast_timer_comms_active:
+            try:
+                # read all required values from ODrive for odometry
+                self.encoder_cpr = self.driver.encoder_cpr
+                self.m_s_to_value = self.encoder_cpr/self.tyre_circumference # calculated
+                
+                self.vel_l = self.driver.left_axis.encoder.vel_estimate  # units: encoder counts/s
+                self.vel_r = -self.driver.right_axis.encoder.vel_estimate # neg is forward for right
+                self.new_pos_l = self.driver.left_axis.encoder.pos_cpr    # units: encoder counts
+                self.new_pos_r = -self.driver.right_axis.encoder.pos_cpr  # sign!
+                
+                # for current
+                self.current_l = self.driver.left_axis.motor.current_control.Ibus
+                self.current_r = self.driver.right_axis.motor.current_control.Ibus
+                
+            except:
+                rospy.logerr("Fast timer exception reading:" + traceback.format_exc())
+                self.fast_timer_comms_active = False
+                
+        # odometry is published regardless of ODrive connection or failure (but assumed zero for those)
+        # as required by SLAM
+        if self.publish_odom:
+            self.publish_odometry(time_now)
+            
+        # check and stop motor if no vel command has been received in > 1s
+        try:
+            if self.fast_timer_comms_active and \
+                    (time_now - self.last_cmd_vel_time).to_sec() > 1.0 and \
+                    self.driver.engaged(): #(self.last_speed > 0):
+                #rospy.logdebug("No /cmd_vel received in > 1s, stopping.")
+            
+                self.driver.drive(0,0)
+                self.last_speed = 0
+                self.last_cmd_vel_time = time_now
+                self.driver.release() # and release
+        except:
+            rospy.logerr("Fast timer exception on cmd_vel timeout:" + traceback.format_exc())
+            self.fast_timer_comms_active = False
+        
+        # handle sending drive commands.
+        # from here, any errors return to get out
+        if self.fast_timer_comms_active and not self.command_queue.empty():
+            # check to see if we're initialised and engaged motor
+            try:
+                if not self.driver.prerolled():
+                    self.driver.preroll()
+            except:
+                rospy.logerr("Fast timer exception on preroll:" + traceback.format_exc())
+                self.fast_timer_comms_active = False                
+            
+            try:
+                motor_command = self.command_queue.get_nowait()
+            except Queue.Empty:
+                rospy.logerr("Queue was empty??" + traceback.format_exc())
+                return
+            
+            if motor_command[0] == 'drive':
+                try:
+                    if not self.driver.engaged():
+                        self.driver.engage()
+                        
+                    left_linear_val, right_linear_val = motor_command[1]
+                    self.driver.drive(left_linear_val, right_linear_val)
+                    self.last_speed = max(abs(left_linear_val), abs(right_linear_val))
+                    self.last_cmd_vel_time = time_now
+                except:
+                    rospy.logerr("Fast timer exception on drive cmd:" + traceback.format_exc())
+                    self.fast_timer_comms_active = False
+            elif motor_command[0] == 'release':
+                pass
+            # ?
+            else:
+                pass
+            
         
     def terminate(self):
+        self.fast_timer.shutdown()
         if self.driver:
             self.driver.release()
-        self.timer.shutdown()
     
     # ROS services
     def connect_driver(self, request):
         if self.driver:
-            rospy.logerr("Already connected.")
             return (False, "Already connected.")
         
         self.driver = ODriveInterfaceAPI(logger=ROSLogger())
         rospy.loginfo("Connecting to ODrive...")
         if not self.driver.connect(right_axis=self.axis_for_right):
             self.driver = None
-            rospy.logerr("Failed to connect.")
+            #rospy.logerr("Failed to connect.")
             return (False, "Failed to connect.")
             
         rospy.loginfo("ODrive connected.")
         
-        self.vel_subscribe = rospy.Subscriber("/cmd_vel", Twist, self.cmd_vel_callback, queue_size=2)
+        # okay, connected, 
         self.m_s_to_value = self.driver.encoder_cpr/self.tyre_circumference
-                
+        
         if self.publish_odom:
             self.old_pos_l = self.driver.left_axis.encoder.pos_cpr
             self.old_pos_r = self.driver.right_axis.encoder.pos_cpr
+        
+        self.fast_timer_comms_active = True
         
         return (True, "ODrive connected successfully")
     
@@ -258,7 +394,6 @@ class ODriveNode(object):
     # Helpers and callbacks
     
     def convert(self, forward, ccw):
-        
         angular_to_linear = ccw * (self.wheel_track/2.0) 
         left_linear_val  = int((forward - angular_to_linear) * self.m_s_to_value)
         right_linear_val = int((forward + angular_to_linear) * self.m_s_to_value)
@@ -283,8 +418,6 @@ class ODriveNode(object):
         left_linear_val, right_linear_val = self.convert(msg.linear.x, msg.angular.z)
         
         # if wheel speed = 0, stop publishing after sending 0 once. #TODO add error term, work out why VESC turns on for 0 rpm
-        if self.last_speed == 0 and abs(left_linear_val) == 0 and abs(right_linear_val) == 0:
-            return
         
         # Then set your wheel speeds (using wheel_left and wheel_right as examples)
         #self.left_motor_pub.publish(left_linear_rpm)
@@ -292,185 +425,137 @@ class ODriveNode(object):
         #wheel_left.set_speed(v_l)
         #wheel_right.set_speed(v_r)
         
-        rospy.logdebug("Driving left: %d, right: %d, from linear.x %.2f and angular.z %.2f" % (left_linear_val, right_linear_val, msg.linear.x, msg.angular.z))
+        #rospy.logdebug("Driving left: %d, right: %d, from linear.x %.2f and angular.z %.2f" % (left_linear_val, right_linear_val, msg.linear.x, msg.angular.z))
         try:
-            self.driver.drive(left_linear_val, right_linear_val)
-        #except ODriveFailure as e:
-        except:
-            rospy.logerr("ODrive failure: " + traceback.format_exc())
-            self.vel_subscribe.unregister()
-            rospy.logerr("I would like to attempt reconnection, but unwise to do so before going away for a week. So if you see this, kill the Odrive node and start again.")
-
-        self.last_speed = max(abs(left_linear_val), abs(right_linear_val))
+            drive_command = ('drive', (left_linear_val, right_linear_val))
+            self.command_queue.put_nowait(drive_command)
+        except Queue.Full:
+            pass
+            
         self.last_cmd_vel_time = rospy.Time.now()
                 
-    def timer_current(self, event):
-        if not self.driver or not hasattr(self.driver, 'driver') or not hasattr(self.driver.driver, 'axis0'):
-            return
-        
-        self.left_current_accumulator += self.driver.left_axis.motor.current_control.Ibus
-        self.right_current_accumulator += self.driver.right_axis.motor.current_control.Ibus
-        
-        self.current_loop_count += 1
-        if self.current_loop_count >= 9:
-            # publish appropriate axis
-            self.current_publisher_left.publish(self.left_current_accumulator)
-            self.current_publisher_right.publish(self.right_current_accumulator)
-            
-            self.current_loop_count = 0
-            self.left_current_accumulator = 0.0
-            self.right_current_accumulator = 0.0
+    # def timer_current(self, event):
+    #     if not self.driver or not hasattr(self.driver, 'driver') or not hasattr(self.driver.driver, 'axis0'):
+    #         return
+    #
+    #     self.left_current_accumulator += self.driver.left_axis.motor.current_control.Ibus
+    #     self.right_current_accumulator += self.driver.right_axis.motor.current_control.Ibus
+    #
+    #     self.current_loop_count += 1
+    #     if self.current_loop_count >= 9:
+    #         # publish appropriate axis
+    #         self.current_publisher_left.publish(self.left_current_accumulator)
+    #         self.current_publisher_right.publish(self.right_current_accumulator)
+    #
+    #         self.current_loop_count = 0
+    #         self.left_current_accumulator = 0.0
+    #         self.right_current_accumulator = 0.0
         #self.current_timer = rospy.Timer(rospy.Duration(0.02), self.timer_current) # publish motor currents at 10Hz, read at 50Hz
         #self.current_publisher_left  = rospy.Publisher('left_current', Float64, queue_size=2)
         #self.current_publisher_right = rospy.Publisher('right_current', Float64, queue_size=2)
-    
-    def timer_odometry(self, event):
-        try:
-            self._timer_odometry(event)
-        except:
-            rospy.logerr("Error in timer: " + traceback.format_exc())
 
-    def _timer_odometry(self, event):
-        now = rospy.Time.now()
+    def publish_odometry(self, time_now):
+        now = time_now
         self.odom_msg.header.stamp = now
         self.tf_msg.header.stamp = now
         
-        #check for driver connected
-        if self.driver is None or not self.driver.connected:
-            # publish same odometry position, but no velocity
-            self.odom_msg.twist.twist.linear.x = 0.0
-            self.odom_msg.twist.twist.angular.z = 0.0
-        else:
-            try:
-                # get values from ODrive
-                # poll driver for each axis position and velocity PLL estimates
-                self.encoder_cpr = self.driver.encoder_cpr
-                self.vel_l = self.driver.left_axis.encoder.vel_estimate  # units: encoder counts/s
-                self.vel_r = -self.driver.right_axis.encoder.vel_estimate # neg is forward for right
-                self.new_pos_l = self.driver.left_axis.encoder.pos_cpr    # units: encoder counts
-                self.new_pos_r = -self.driver.right_axis.encoder.pos_cpr  # sign!
-                self.driver_failed = False
-            except:
-                if not self.driver_failed: # first error so report it
-                    rospy.logerr("Error in odometry timer polling the ODrive API: " + traceback.format_exc())
-                    self.driver_failed = True
-                # assume zero velocity if connection fails, this will stop odometry drift in localisation
-                self.vel_l = 0
-                self.vel_r = 0
-                # leave self.new_pos_l and r as the same to keep same position
-            
-            wheel_track = self.wheel_track   # check these. Values in m
-            tyre_circumference = self.tyre_circumference
-            # self.m_s_to_value = encoder_cpr/tyre_circumference set earlier
+        wheel_track = self.wheel_track   # check these. Values in m
+        tyre_circumference = self.tyre_circumference
+        # self.m_s_to_value = encoder_cpr/tyre_circumference set earlier
+    
+        # Twist/velocity: calculated from motor values only
+        s = tyre_circumference * (self.vel_l+self.vel_r) / (2.0*self.encoder_cpr)
+        w = tyre_circumference * (self.vel_r-self.vel_l) / (wheel_track * self.encoder_cpr) # angle: vel_r*tyre_radius - vel_l*tyre_radius
+        self.odom_msg.twist.twist.linear.x = s
+        self.odom_msg.twist.twist.angular.z = w
+    
+        #rospy.loginfo("vel_l: % 2.2f  vel_r: % 2.2f  vel_l: % 2.2f  vel_r: % 2.2f  x: % 2.2f  th: % 2.2f  pos_l: % 5.1f pos_r: % 5.1f " % (
+        #                vel_l, -vel_r,
+        #                vel_l/encoder_cpr, vel_r/encoder_cpr, self.odom_msg.twist.twist.linear.x, self.odom_msg.twist.twist.angular.z,
+        #                self.driver.left_axis.encoder.pos_cpr, self.driver.right_axis.encoder.pos_cpr))
         
-            # Twist/velocity: calculated from motor values only
-            s = tyre_circumference * (self.vel_l+self.vel_r) / (2.0*self.encoder_cpr)
-            w = tyre_circumference * (self.vel_r-self.vel_l) / (wheel_track * self.encoder_cpr) # angle: vel_r*tyre_radius - vel_l*tyre_radius
-            self.odom_msg.twist.twist.linear.x = s
-            self.odom_msg.twist.twist.angular.z = w
+        # Position
+        delta_pos_l = self.new_pos_l - self.old_pos_l
+        delta_pos_r = self.new_pos_r - self.old_pos_r
         
-            #rospy.loginfo("vel_l: % 2.2f  vel_r: % 2.2f  vel_l: % 2.2f  vel_r: % 2.2f  x: % 2.2f  th: % 2.2f  pos_l: % 5.1f pos_r: % 5.1f " % (
-            #                vel_l, -vel_r,
-            #                vel_l/encoder_cpr, vel_r/encoder_cpr, self.odom_msg.twist.twist.linear.x, self.odom_msg.twist.twist.angular.z,
-            #                self.driver.left_axis.encoder.pos_cpr, self.driver.right_axis.encoder.pos_cpr))
-            
-            # Position
-            delta_pos_l = self.new_pos_l - self.old_pos_l
-            delta_pos_r = self.new_pos_r - self.old_pos_r
-            
-            self.old_pos_l = self.new_pos_l
-            self.old_pos_r = self.new_pos_r
-            
-            # Check for overflow. Assume we can't move more than half a circumference in a single timestep. 
-            half_cpr = self.encoder_cpr/2.0
-            if   delta_pos_l >  half_cpr: delta_pos_l = delta_pos_l - self.encoder_cpr
-            elif delta_pos_l < -half_cpr: delta_pos_l = delta_pos_l + self.encoder_cpr
-            if   delta_pos_r >  half_cpr: delta_pos_r = delta_pos_r - self.encoder_cpr
-            elif delta_pos_r < -half_cpr: delta_pos_r = delta_pos_r + self.encoder_cpr
-            
-            # counts to metres
-            delta_pos_l_m = delta_pos_l / self.m_s_to_value
-            delta_pos_r_m = delta_pos_r / self.m_s_to_value
+        self.old_pos_l = self.new_pos_l
+        self.old_pos_r = self.new_pos_r
         
-            # Distance travelled
-            d = (delta_pos_l_m+delta_pos_r_m)/2.0  # delta_ps
-            th = (delta_pos_r_m-delta_pos_l_m)/wheel_track # works for small angles
+        # Check for overflow. Assume we can't move more than half a circumference in a single timestep. 
+        half_cpr = self.encoder_cpr/2.0
+        if   delta_pos_l >  half_cpr: delta_pos_l = delta_pos_l - self.encoder_cpr
+        elif delta_pos_l < -half_cpr: delta_pos_l = delta_pos_l + self.encoder_cpr
+        if   delta_pos_r >  half_cpr: delta_pos_r = delta_pos_r - self.encoder_cpr
+        elif delta_pos_r < -half_cpr: delta_pos_r = delta_pos_r + self.encoder_cpr
         
-            xd = math.cos(th)*d
-            yd = -math.sin(th)*d
+        # counts to metres
+        delta_pos_l_m = delta_pos_l / self.m_s_to_value
+        delta_pos_r_m = delta_pos_r / self.m_s_to_value
+    
+        # Distance travelled
+        d = (delta_pos_l_m+delta_pos_r_m)/2.0  # delta_ps
+        th = (delta_pos_r_m-delta_pos_l_m)/wheel_track # works for small angles
+    
+        xd = math.cos(th)*d
+        yd = -math.sin(th)*d
+    
+        # elapsed time = event.last_real, event.current_real
+        #elapsed = (event.current_real-event.last_real).to_sec()
+        # calc_vel: d/elapsed, th/elapsed
+    
+        # Pose: updated from previous pose + position delta
+        self.x += math.cos(self.theta)*xd - math.sin(self.theta)*yd
+        self.y += math.sin(self.theta)*xd + math.cos(self.theta)*yd
+        self.theta = (self.theta + th) % (2*math.pi)
+    
+        #rospy.loginfo("dl_m: % 2.2f  dr_m: % 2.2f  d: % 2.2f  th: % 2.2f  xd: % 2.2f  yd: % 2.2f  x: % 5.1f y: % 5.1f  th: % 5.1f" % (
+        #                delta_pos_l_m, delta_pos_r_m,
+        #                d, th, xd, yd,
+        #                self.x, self.y, self.theta
+        #                ))
+    
+        # fill odom message and publish
         
-            # elapsed time = event.last_real, event.current_real
-            elapsed = (event.current_real-event.last_real).to_sec()
-            # calc_vel: d/elapsed, th/elapsed
+        self.odom_msg.pose.pose.position.x = self.x
+        self.odom_msg.pose.pose.position.y = self.y
+        q = tf_conversions.transformations.quaternion_from_euler(0.0, 0.0, self.theta)
+        self.odom_msg.pose.pose.orientation.z = q[2] # math.sin(self.theta)/2
+        self.odom_msg.pose.pose.orientation.w = q[3] # math.cos(self.theta)/2
+    
+        #rospy.loginfo("theta: % 2.2f  z_m: % 2.2f  w_m: % 2.2f  q[2]: % 2.2f  q[3]: % 2.2f (q[0]: %2.2f  q[1]: %2.2f)" % (
+        #                        self.theta,
+        #                        math.sin(self.theta)/2, math.cos(self.theta)/2,
+        #                        q[2],q[3],q[0],q[1]
+        #                        ))
+    
+        #self.odom_msg.pose.covariance
+         # x y z
+         # x y z
+    
+        self.tf_msg.transform.translation.x = self.x
+        self.tf_msg.transform.translation.y = self.y
+        #self.tf_msg.transform.rotation.x
+        #self.tf_msg.transform.rotation.x
+        self.tf_msg.transform.rotation.z = q[2]
+        self.tf_msg.transform.rotation.w = q[3]
         
-            # Pose: updated from previous pose + position delta
-            self.x += math.cos(self.theta)*xd - math.sin(self.theta)*yd
-            self.y += math.sin(self.theta)*xd + math.cos(self.theta)*yd
-            self.theta = (self.theta + th) % (2*math.pi)
-        
-            #rospy.loginfo("dl_m: % 2.2f  dr_m: % 2.2f  d: % 2.2f  th: % 2.2f  xd: % 2.2f  yd: % 2.2f  x: % 5.1f y: % 5.1f  th: % 5.1f" % (
-            #                delta_pos_l_m, delta_pos_r_m,
-            #                d, th, xd, yd,
-            #                self.x, self.y, self.theta
-            #                ))
-        
-            # fill odom message and publish
-            
-            self.odom_msg.pose.pose.position.x = self.x
-            self.odom_msg.pose.pose.position.y = self.y
-            q = tf_conversions.transformations.quaternion_from_euler(0.0, 0.0, self.theta)
-            self.odom_msg.pose.pose.orientation.z = q[2] # math.sin(self.theta)/2
-            self.odom_msg.pose.pose.orientation.w = q[3] # math.cos(self.theta)/2
-        
-            #rospy.loginfo("theta: % 2.2f  z_m: % 2.2f  w_m: % 2.2f  q[2]: % 2.2f  q[3]: % 2.2f (q[0]: %2.2f  q[1]: %2.2f)" % (
-            #                        self.theta,
-            #                        math.sin(self.theta)/2, math.cos(self.theta)/2,
-            #                        q[2],q[3],q[0],q[1]
-            #                        ))
-        
-            #self.odom_msg.pose.covariance
-             # x y z
-             # x y z
-        
-            self.tf_msg.transform.translation.x = self.x
-            self.tf_msg.transform.translation.y = self.y
-            #self.tf_msg.transform.rotation.x
-            #self.tf_msg.transform.rotation.x
-            self.tf_msg.transform.rotation.z = q[2]
-            self.tf_msg.transform.rotation.w = q[3]
-            
-            if self.publish_raw_odom:
-                self.raw_odom_publisher_encoder_left.publish(self.new_pos_l)
-                self.raw_odom_publisher_encoder_right.publish(self.new_pos_r)
-                self.raw_odom_publisher_vel_left.publish(self.vel_l)
-                self.raw_odom_publisher_vel_right.publish(self.vel_r)
+        if self.publish_raw_odom:
+            self.raw_odom_publisher_encoder_left.publish(self.new_pos_l)
+            self.raw_odom_publisher_encoder_right.publish(self.new_pos_r)
+            self.raw_odom_publisher_vel_left.publish(self.vel_l)
+            self.raw_odom_publisher_vel_right.publish(self.vel_r)
         
         # ... and publish!
         self.odom_publisher.publish(self.odom_msg)
         if self.publish_tf:
             self.tf_publisher.sendTransform(self.tf_msg)            
         
-    def timer_check(self, event):
-        """Check for cmd_vel 1 sec timeout. """
-        if not self.driver:
-            return
-        
-        if self.last_cmd_vel_time is None:
-            return
-        
-        # if moving, and no cmd_vel received, stop
-        if (event.current_real-self.last_cmd_vel_time).to_sec() > 1.0 and (self.last_speed > 0):
-            rospy.logdebug("No /cmd_vel received in > 1s, stopping.")
-            self.driver.drive(0,0)
-            self.last_speed = 0
-            self.last_cmd_vel_time = event.current_real
-            
 
 def start_odrive():
     rospy.init_node('odrive')
     odrive_node = ODriveNode()
-    
-    rospy.spin() 
+    odrive_node.main_loop()
+    #rospy.spin() 
     
 if __name__ == '__main__':
     try:

@@ -1,4 +1,10 @@
 
+## 0.4.0 2019-03-19
+
+Reworked all ODrive comms into a fast+slow thread. 
+Added error recovery on comms failure.
+Added auto preroll on first drive.
+
 ## 0.3.1 2018-11-01
 
 Max speed and angular velocity parameter.
