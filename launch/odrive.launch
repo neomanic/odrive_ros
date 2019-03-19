@@ -7,7 +7,11 @@
     <arg name="publish_odom"   default="true"/>
     <arg name="publish_tf"     default="false"/>
     
-    <node pkg="odrive_ros" type="odrive_node" name="odrive" output="screen" ns="odrive">
+    <arg name="output"   default="screen"/>
+    <arg name="respawn"   default="false"/>
+    
+    <node pkg="odrive_ros" type="odrive_node" name="odrive" ns="odrive" 
+            output="$(arg output)" respawn="$(arg respawn)">
         <param name="wheel_track" value="0.285"/>
         <param name="tyre_circumference" value="0.341"/>
         

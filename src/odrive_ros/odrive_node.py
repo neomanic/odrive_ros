@@ -97,14 +97,13 @@ class ODriveNode(object):
         self.command_queue = Queue.Queue(maxsize=5)
         self.vel_subscribe = rospy.Subscriber("/cmd_vel", Twist, self.cmd_vel_callback, queue_size=2)
         
-        # if self.publish_current:
-        #     self.current_loop_count = 0
-        #     self.left_current_accumulator  = 0.0
-        #     self.right_current_accumulator = 0.0
-        #     self.current_timer = rospy.Timer(rospy.Duration(0.05), self.timer_current) # publish motor currents at 10Hz, read at 50Hz
-        #     self.current_publisher_left  = rospy.Publisher('odrive/left_current', Float64, queue_size=2)
-        #     self.current_publisher_right = rospy.Publisher('odrive/right_current', Float64, queue_size=2)
-        #     rospy.loginfo("ODrive will publish motor currents.")
+        if self.publish_current:
+            self.current_loop_count = 0
+            self.left_current_accumulator  = 0.0
+            self.right_current_accumulator = 0.0
+            self.current_publisher_left  = rospy.Publisher('odrive/left_current', Float64, queue_size=2)
+            self.current_publisher_right = rospy.Publisher('odrive/right_current', Float64, queue_size=2)
+            rospy.loginfo("ODrive will publish motor currents.")
         
         self.last_cmd_vel_time = rospy.Time.now()
         
@@ -189,7 +188,7 @@ class ODriveNode(object):
                         # must have called connect service from another node
                         self.fast_timer_comms_active = True
                 except:
-                    rospy.logerr("Errors accessing ODriver:" + traceback.format_exc())
+                    rospy.logerr("Errors accessing ODrive:" + traceback.format_exc())
                     self.driver = None
             
             if not self.driver:
@@ -259,6 +258,8 @@ class ODriveNode(object):
         # as required by SLAM
         if self.publish_odom:
             self.publish_odometry(time_now)
+        if self.publish_current:
+            self.publish_current(time_now)
             
         # check and stop motor if no vel command has been received in > 1s
         try:
@@ -434,25 +435,20 @@ class ODriveNode(object):
             
         self.last_cmd_vel_time = rospy.Time.now()
                 
-    # def timer_current(self, event):
-    #     if not self.driver or not hasattr(self.driver, 'driver') or not hasattr(self.driver.driver, 'axis0'):
-    #         return
-    #
-    #     self.left_current_accumulator += self.driver.left_axis.motor.current_control.Ibus
-    #     self.right_current_accumulator += self.driver.right_axis.motor.current_control.Ibus
-    #
-    #     self.current_loop_count += 1
-    #     if self.current_loop_count >= 9:
-    #         # publish appropriate axis
-    #         self.current_publisher_left.publish(self.left_current_accumulator)
-    #         self.current_publisher_right.publish(self.right_current_accumulator)
-    #
-    #         self.current_loop_count = 0
-    #         self.left_current_accumulator = 0.0
-    #         self.right_current_accumulator = 0.0
-        #self.current_timer = rospy.Timer(rospy.Duration(0.02), self.timer_current) # publish motor currents at 10Hz, read at 50Hz
-        #self.current_publisher_left  = rospy.Publisher('left_current', Float64, queue_size=2)
-        #self.current_publisher_right = rospy.Publisher('right_current', Float64, queue_size=2)
+    def publish_current(self):
+        current_quantizer = 10
+        
+        self.left_current_accumulator += self.current_l
+        self.right_current_accumulator += self.current_r
+    
+        self.current_loop_count += 1
+        if self.current_loop_count >= current_quantizer:
+            self.current_publisher_left.publish(float(self.left_current_accumulator) / current_quantizer)
+            self.current_publisher_right.publish(float(self.right_current_accumulator) / current_quantizer)
+    
+            self.current_loop_count = 0
+            self.left_current_accumulator = 0.0
+            self.right_current_accumulator = 0.0
 
     def publish_odometry(self, time_now):
         now = time_now
