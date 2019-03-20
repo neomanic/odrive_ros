@@ -83,7 +83,7 @@ class ODriveNode(object):
         self.odom_topic      = rospy.get_param('~odom_topic', "odom")
         self.odom_frame      = rospy.get_param('~odom_frame', "odom")
         self.base_frame      = rospy.get_param('~base_frame', "base_link")
-        self.odom_calc_hz    = rospy.get_param('~odom_calc_hz', 50)
+        self.odom_calc_hz    = rospy.get_param('~odom_calc_hz', 25)
         
         rospy.on_shutdown(self.terminate)
 
@@ -243,7 +243,7 @@ class ODriveNode(object):
         # check and stop motor if no vel command has been received in > 1s
         try:
             if self.fast_timer_comms_active and \
-                    (time_now - self.last_cmd_vel_time).to_sec() > 1.0 and \
+                    (time_now - self.last_cmd_vel_time).to_sec() > 2.0 and \
                     self.driver.engaged(): #(self.last_speed > 0):
                 #rospy.logdebug("No /cmd_vel received in > 1s, stopping.")
             
@@ -262,6 +262,7 @@ class ODriveNode(object):
             try:
                 if not self.driver.prerolled():
                     self.driver.preroll()
+                    return
             except:
                 rospy.logerr("Fast timer exception on preroll:" + traceback.format_exc())
                 self.fast_timer_comms_active = False                
@@ -415,7 +416,7 @@ class ODriveNode(object):
         self.last_cmd_vel_time = rospy.Time.now()
                 
     def pub_current(self):
-        current_quantizer = 10
+        current_quantizer = 5
         
         self.left_current_accumulator += self.current_l
         self.right_current_accumulator += self.current_r
