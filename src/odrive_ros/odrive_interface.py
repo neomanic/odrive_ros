@@ -8,6 +8,7 @@ import traceback
 
 import odrive
 from odrive.enums import *
+from odrive.utils import dump_errors
 
 import fibre
 
@@ -179,6 +180,9 @@ class ODriveInterfaceAPI(object):
             return None
             
         axis_error = self.axes[0].error or self.axes[1].error
+
+        if axis_error:
+            return dump_errors(self.driver, clear=clear)
         
         if clear:
             for axis in self.axes:
@@ -187,8 +191,7 @@ class ODriveInterfaceAPI(object):
                 axis.encoder.error = 0
                 axis.controller.error = 0
         
-        if axis_error:
-            return "error"
+        
         
         
         
