@@ -179,19 +179,6 @@ class ODriveInterfaceAPI(object):
         if not self.driver:
             return None
             
-        axis_error = self.axes[0].error or self.axes[1].error
-
-        if axis_error:
-            return dump_errors(self.driver, clear=clear)
-        
-        if clear:
-            for axis in self.axes:
-                axis.error = 0
-                axis.motor.error = 0
-                axis.encoder.error = 0
-                axis.controller.error = 0
-        
-        
-        
+        return dump_errors(self.driver, clear=clear)
         
         
