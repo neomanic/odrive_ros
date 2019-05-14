@@ -29,7 +29,8 @@ class ODriveInterfaceAPI(object):
     right_axis = None
     left_axis = None
     connected = False
-    _prerolled = False
+    _preroll_started = False
+    _preroll_completed = False
     #engaged = False
     
     def __init__(self, logger=None):
@@ -59,6 +60,10 @@ class ODriveInterfaceAPI(object):
                         self.driver.fw_version_major, self.driver.fw_version_minor, self.driver.fw_version_revision,
                         "-dev" if self.driver.fw_version_unreleased else ""
                         ))
+                        
+        self._preroll_started = False
+        self._preroll_completed = False
+        
         return True
         
     def disconnect(self):
@@ -66,7 +71,6 @@ class ODriveInterfaceAPI(object):
         self.right_axis = None
         self.left_axis = None
         
-        self._prerolled = False
         #self.engaged = False
         
         if not self.driver:
@@ -106,7 +110,7 @@ class ODriveInterfaceAPI(object):
             self.logger.error("Not connected.")
             return False
             
-        if self._prerolled: # must be prerolling or already prerolled
+        if self._preroll_started: # must be prerolling or already prerolled
             return False
             
         #self.logger.info("Vbus %.2fV" % self.driver.vbus_voltage)
@@ -114,6 +118,8 @@ class ODriveInterfaceAPI(object):
         for i, axis in enumerate(self.axes):
             self.logger.info("Index search preroll axis %d..." % i)
             axis.requested_state = AXIS_STATE_ENCODER_INDEX_SEARCH
+            
+        self._preroll_started = True
         
         if wait:
             for i, axis in enumerate(self.axes):
@@ -123,14 +129,41 @@ class ODriveInterfaceAPI(object):
                 if axis.error != 0:
                     self.logger.error("Failed preroll with axis error 0x%x, motor error 0x%x" % (axis.error, axis.motor.error))
                     return False
-        self._prerolled = True
-        return True
+            self._preroll_completed = True
+        else:
+            return False
         
-    def prerolling(self):
-        return self.axes[0].current_state == AXIS_STATE_ENCODER_INDEX_SEARCH or self.axes[1].current_state == AXIS_STATE_ENCODER_INDEX_SEARCH
-    
-    def prerolled(self): #
-        return self._prerolled and not self.prerolling()
+    # def prerolling(self):
+    #     return self.axes[0].current_state == AXIS_STATE_ENCODER_INDEX_SEARCH or self.axes[1].current_state == AXIS_STATE_ENCODER_INDEX_SEARCH
+    #
+    # def prerolled(self): #
+    #     return self._prerolled and not self.prerolling()
+        
+    def ensure_prerolled(self):
+        # preroll success
+        if self._preroll_completed:
+            return True
+        # started, not completed
+        elif self._preroll_started:
+            #self.logger.info("Checking for preroll complete.")
+            if self.axes[0].current_state != AXIS_STATE_ENCODER_INDEX_SEARCH and self.axes[1].current_state != AXIS_STATE_ENCODER_INDEX_SEARCH:
+                # completed, check for errors before marking complete
+                for i, axis in enumerate(self.axes):
+                    if axis.error != 0:
+                        error_str = "Failed preroll with axis error 0x%x, motor error 0x%x, encoder error 0x%x" % (axis.error, axis.motor.error, axis.encoder.error)
+                        self.logger.error(error_str)
+                        raise Exception(error_str)
+                # no errors, success
+                self._preroll_completed = True
+                self.logger.info("Preroll complete.")
+                return True
+            else:
+                # still prerolling
+                return False
+        else: # start preroll
+            #self.logger.info("Preroll started.")
+            self.preroll(wait=False)
+            return False
     
     def engaged(self):
         return self.axes[0].current_state == AXIS_STATE_CLOSED_LOOP_CONTROL or self.axes[1].current_state == AXIS_STATE_CLOSED_LOOP_CONTROL

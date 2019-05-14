@@ -240,17 +240,17 @@ class ODriveNode(object):
         if self.publish_current:
             self.pub_current()
             
-        # check and stop motor if no vel command has been received in > 1s
+        
         try:
-            if self.fast_timer_comms_active and \
-                    (time_now - self.last_cmd_vel_time).to_sec() > 2.0 and \
-                    self.driver.engaged(): #(self.last_speed > 0):
-                #rospy.logdebug("No /cmd_vel received in > 1s, stopping.")
-            
-                self.driver.drive(0,0)
-                self.last_speed = 0
-                self.last_cmd_vel_time = time_now
-                self.driver.release() # and release
+            # check and stop motor if no vel command has been received in > 1s
+            if self.fast_timer_comms_active:
+                if (time_now - self.last_cmd_vel_time).to_sec() > 0.5 and self.last_speed > 0:
+                    self.driver.drive(0,0)
+                    self.last_speed = 0
+                    self.last_cmd_vel_time = time_now
+                # release motor after 10s stopped
+                if (time_now - self.last_cmd_vel_time).to_sec() > 10.0 and self.driver.engaged():
+                    self.driver.release() # and release            
         except:
             rospy.logerr("Fast timer exception on cmd_vel timeout:" + traceback.format_exc())
             self.fast_timer_comms_active = False
@@ -260,8 +260,7 @@ class ODriveNode(object):
         if self.fast_timer_comms_active and not self.command_queue.empty():
             # check to see if we're initialised and engaged motor
             try:
-                if not self.driver.prerolled():
-                    self.driver.preroll()
+                if not self.driver.ensure_prerolled():
                     return
             except:
                 rospy.logerr("Fast timer exception on preroll:" + traceback.format_exc())
@@ -309,7 +308,7 @@ class ODriveNode(object):
             #rospy.logerr("Failed to connect.")
             return (False, "Failed to connect.")
             
-        rospy.loginfo("ODrive connected.")
+        #rospy.loginfo("ODrive connected.")
         
         # okay, connected, 
         self.m_s_to_value = self.driver.encoder_cpr/self.tyre_circumference
