@@ -216,6 +216,7 @@ class ODriveNode(object):
         # Handle reading from Odrive and sending odometry
         if self.fast_timer_comms_active:
             try:
+                
                 # read all required values from ODrive for odometry
                 self.encoder_cpr = self.driver.encoder_cpr
                 self.m_s_to_value = self.encoder_cpr/self.tyre_circumference # calculated
@@ -263,9 +264,8 @@ class ODriveNode(object):
                 if not self.driver.ensure_prerolled():
                     return
             except:
-                rospy.logerr("Fast timer exception on preroll, rebooting." + traceback.format_exc())
+                rospy.logerr("Fast timer exception on preroll." + traceback.format_exc())
                 self.fast_timer_comms_active = False                
-                self.driver.reboot()
             try:
                 motor_command = self.command_queue.get_nowait()
             except Queue.Empty:

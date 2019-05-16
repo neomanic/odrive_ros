@@ -48,10 +48,18 @@ class ODriveInterfaceAPI(object):
         except:
             self.logger.error("No ODrive found. Is device powered?")
             return False
-            
+                        
         # save some parameters for easy access
         self.right_axis = self.driver.axis0 if right_axis == 0 else self.driver.axis1
         self.left_axis  = self.driver.axis1 if right_axis == 0 else self.driver.axis0
+        
+        # check for no errors
+        for axis in [self.right_axis, self.left_axis]:
+            if axis.error != 0:
+                error_str = "Had error on startup, rebooting. Axis error 0x%x, motor error 0x%x, encoder error 0x%x. Rebooting." % (axis.error, axis.motor.error, axis.encoder.error)
+                self.driver.reboot()
+                return False
+        
         self.encoder_cpr = self.driver.axis0.encoder.config.cpr
         
         self.connected = True
@@ -78,7 +86,7 @@ class ODriveInterfaceAPI(object):
             return False
         
         try:
-            self.driver.release()
+            self.release()
         except:
             self.logger.error("Error in timer: " + traceback.format_exc())
             return False
@@ -164,7 +172,8 @@ class ODriveInterfaceAPI(object):
                 # completed, check for errors before marking complete
                 for i, axis in enumerate(self.axes):
                     if axis.error != 0:
-                        error_str = "Failed preroll with axis error 0x%x, motor error 0x%x, encoder error 0x%x" % (axis.error, axis.motor.error, axis.encoder.error)
+                        error_str = "Failed preroll with axis error 0x%x, motor error 0x%x, encoder error 0x%x. Rebooting." % (axis.error, axis.motor.error, axis.encoder.error)
+                        self.driver.reboot()
                         self.logger.error(error_str)
                         raise Exception(error_str)
                 # no errors, success
@@ -232,7 +241,7 @@ class ODriveInterfaceAPI(object):
                 axis.error = 0
                 axis.motor.error = 0
                 axis.encoder.error = 0
-                axis.controller.error = 0
+                #axis.controller.error = 0
         
         if axis_error:
             return "error"
