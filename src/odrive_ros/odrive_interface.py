@@ -85,7 +85,21 @@ class ODriveInterfaceAPI(object):
         finally:
             self.driver = None
         return True
-
+        
+    def reboot(self):
+        if not self.driver:
+            self.logger.error("Not connected.")
+            return False
+        
+        try:
+            self.driver.reboot()
+        except:
+            self.logger.error("Failed to reboot: " + traceback.format_exc())
+            return False
+        finally:
+            self.driver = None
+        return True
+        
     def calibrate(self):
         if not self.driver:
             self.logger.error("Not connected.")

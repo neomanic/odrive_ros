@@ -263,9 +263,9 @@ class ODriveNode(object):
                 if not self.driver.ensure_prerolled():
                     return
             except:
-                rospy.logerr("Fast timer exception on preroll:" + traceback.format_exc())
+                rospy.logerr("Fast timer exception on preroll, rebooting." + traceback.format_exc())
                 self.fast_timer_comms_active = False                
-            
+                self.driver.reboot()
             try:
                 motor_command = self.command_queue.get_nowait()
             except Queue.Empty:
@@ -363,6 +363,7 @@ class ODriveNode(object):
         if not self.driver.release():
             return (False, "Failed to release motor.")
         return (True, "Release motor success.")
+        
     
     def reset_odometry(self, request):
         self.x = 0.0
