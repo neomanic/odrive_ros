@@ -90,9 +90,10 @@ class ODriveNode(object):
         rospy.Service('connect_driver',    std_srvs.srv.Trigger, self.connect_driver)
         rospy.Service('disconnect_driver', std_srvs.srv.Trigger, self.disconnect_driver)
     
-        rospy.Service('calibrate_motors',  std_srvs.srv.Trigger, self.calibrate_motor)
-        rospy.Service('engage_motors',     std_srvs.srv.Trigger, self.engage_motor)
-        rospy.Service('release_motors',    std_srvs.srv.Trigger, self.release_motor)
+        rospy.Service('calibrate_motors',         std_srvs.srv.Trigger, self.calibrate_motor)
+        rospy.Service('calibrate_motors_reverse', std_srvs.srv.Trigger, self.calibrate_motor_reverse)
+        rospy.Service('engage_motors',            std_srvs.srv.Trigger, self.engage_motor)
+        rospy.Service('release_motors',           std_srvs.srv.Trigger, self.release_motor)
         
         self.command_queue = Queue.Queue(maxsize=5)
         self.vel_subscribe = rospy.Subscriber("/cmd_vel", Twist, self.cmd_vel_callback, queue_size=2)
@@ -340,7 +341,21 @@ class ODriveNode(object):
             return (False, "Not connected.")
             
         if self.has_preroll:
-            if not self.driver.preroll():
+            if not self.driver.preroll(wait=True, reverse=False):
+                return (False, "Failed preroll.")        
+        else:
+            if not self.driver.calibrate():
+                return (False, "Failed calibration.")
+                
+        return (True, "Calibration success.")
+ 
+    def calibrate_motor_reverse(self, request):
+        if not self.driver:
+            rospy.logerr("Not connected.")
+            return (False, "Not connected.")
+            
+        if self.has_preroll:
+            if not self.driver.preroll(wait=True, reverse=True):
                 return (False, "Failed preroll.")        
         else:
             if not self.driver.calibrate():
