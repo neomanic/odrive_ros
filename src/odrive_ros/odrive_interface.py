@@ -139,9 +139,6 @@ class ODriveInterfaceAPI(object):
             
         #self.logger.info("Vbus %.2fV" % self.driver.vbus_voltage)
         
-        self.axes[0].motor.config.direction = -1  if not reverse else 1
-        self.axes[1].motor.config.direction = 1 if not reverse else -1
-        
         for i, axis in enumerate(self.axes):
             self.logger.info("Index search preroll axis %d..." % i)
             axis.requested_state = AXIS_STATE_ENCODER_INDEX_SEARCH
@@ -156,8 +153,6 @@ class ODriveInterfaceAPI(object):
                     return False
             self._preroll_started = False
             self._preroll_completed = True
-            self.axes[0].motor.config.direction = -1
-            self.axes[1].motor.config.direction = 1
             self.logger.info("Index search preroll complete.")
             return True
         else:
@@ -185,8 +180,6 @@ class ODriveInterfaceAPI(object):
                         self.logger.error(error_str)
                         raise Exception(error_str)
                 # no errors, success
-                self.axes[0].motor.config.direction = -1
-                self.axes[1].motor.config.direction = 1
                 self._preroll_started = False
                 self._preroll_completed = True
                 self.logger.info("Preroll complete.")
@@ -236,7 +229,7 @@ class ODriveInterfaceAPI(object):
             return
         #try:
         self.left_axis.controller.vel_setpoint = left_motor_val
-        self.right_axis.controller.vel_setpoint = right_motor_val
+        self.right_axis.controller.vel_setpoint = -right_motor_val
         #except (fibre.protocol.ChannelBrokenException, AttributeError) as e:
         #    raise ODriveFailure(str(e))
         
