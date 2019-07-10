@@ -200,8 +200,10 @@ class ODriveNode(object):
             if self.driver:
                 try:
                     # driver connected, but fast_comms not active -> must be an error?
-                    if self.driver.get_errors(clear=True):
+                    error_string = self.driver.get_errors(clear=True)
+                    if error_string:
                         rospy.logerr("Had errors, disconnecting and retrying connection.")
+                        rospy.logerr(error_string)
                         self.driver.disconnect()
                         self.driver = None
                     else:
@@ -236,20 +238,25 @@ class ODriveNode(object):
         # Handle reading from Odrive and sending odometry
         if self.fast_timer_comms_active:
             try:
-                # read all required values from ODrive for odometry
-                self.encoder_cpr = self.driver.encoder_cpr
-                self.m_s_to_value = self.encoder_cpr/self.tyre_circumference # calculated
+                # check errors
+                error_string = self.driver.get_errors()
+                if error_string:
+                    self.fast_timer_comms_active = False
+                else:
+                    # read all required values from ODrive for odometry
+                    self.encoder_cpr = self.driver.encoder_cpr
+                    self.m_s_to_value = self.encoder_cpr/self.tyre_circumference # calculated
                 
-                self.driver.update_time(time_now.to_sec())
-                self.vel_l = self.driver.left_vel_estimate()   # units: encoder counts/s
-                self.vel_r = -self.driver.right_vel_estimate() # neg is forward for right
-                self.new_pos_l = self.driver.left_pos()        # units: encoder counts
-                self.new_pos_r = -self.driver.right_pos()      # sign!
+                    self.driver.update_time(time_now.to_sec())
+                    self.vel_l = self.driver.left_vel_estimate()   # units: encoder counts/s
+                    self.vel_r = -self.driver.right_vel_estimate() # neg is forward for right
+                    self.new_pos_l = self.driver.left_pos()        # units: encoder counts
+                    self.new_pos_r = -self.driver.right_pos()      # sign!
                 
-                # for current
-                self.current_l = self.driver.left_current()
-                self.current_r = self.driver.right_current()
-                
+                    # for current
+                    self.current_l = self.driver.left_current()
+                    self.current_r = self.driver.right_current()
+            
             except:
                 rospy.logerr("Fast timer exception reading:" + traceback.format_exc())
                 self.fast_timer_comms_active = False

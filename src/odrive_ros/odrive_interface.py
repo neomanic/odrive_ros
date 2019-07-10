@@ -245,15 +245,21 @@ class ODriveInterfaceAPI(object):
             
         axis_error = self.axes[0].error or self.axes[1].error
         
+        if axis_error:
+            error_string = "Errors(hex): L: a%x m%x e%x c%x, R: a%x m%x e%x c%x" % (
+                self.left_axis.error,  self.left_axis.motor.error,  self.left_axis.encoder.error,  self.left_axis.controller.error,
+                self.right_axis.error, self.right_axis.motor.error, self.right_axis.encoder.error, self.right_axis.controller.error,
+            )
+        
         if clear:
             for axis in self.axes:
                 axis.error = 0
                 axis.motor.error = 0
                 axis.encoder.error = 0
-                #axis.controller.error = 0
+                axis.controller.error = 0
         
         if axis_error:
-            return "error"
+            return error_string
             
     def left_vel_estimate(self):  return self.left_axis.encoder.vel_estimate   if self.left_axis  else 0 # units: encoder counts/s
     def right_vel_estimate(self): return self.right_axis.encoder.vel_estimate  if self.right_axis else 0 # neg is forward for right
