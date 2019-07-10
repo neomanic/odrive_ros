@@ -38,6 +38,10 @@ class ODriveInterfaceAPI(object):
                 
     def __del__(self):
         self.disconnect()
+        
+    def update_time(self, curr_time):
+        # provided so simulator can update position
+        pass
                     
     def connect(self, port=None, right_axis=0, timeout=30):
         if self.driver:
@@ -63,10 +67,11 @@ class ODriveInterfaceAPI(object):
         self.encoder_cpr = self.driver.axis0.encoder.config.cpr
         
         self.connected = True
-        self.logger.info("Connected to ODrive. Hardware v%d.%d-%d, firmware v%d.%d.%d%s" % (
+        self.logger.info("Connected to ODrive. Hardware v%d.%d-%d, Firmware v%d.%d.%d%s, SDK v%s" % (
                         self.driver.hw_version_major, self.driver.hw_version_minor, self.driver.hw_version_variant,
                         self.driver.fw_version_major, self.driver.fw_version_minor, self.driver.fw_version_revision,
-                        "-dev" if self.driver.fw_version_unreleased else ""
+                        "-dev" if self.driver.fw_version_unreleased else "",
+                        odrive.version.get_version_str(),
                         ))
                         
         self._preroll_started = False
@@ -249,6 +254,12 @@ class ODriveInterfaceAPI(object):
         
         if axis_error:
             return "error"
-        
-        
-        
+            
+    def left_vel_estimate(self):  return self.left_axis.encoder.vel_estimate   if self.left_axis  else 0 # units: encoder counts/s
+    def right_vel_estimate(self): return self.right_axis.encoder.vel_estimate  if self.right_axis else 0 # neg is forward for right
+    def left_pos(self):           return self.left_axis.encoder.pos_cpr        if self.left_axis  else 0  # units: encoder counts
+    def right_pos(self):          return self.right_axis.encoder.pos_cpr       if self.right_axis else 0   # sign!
+    
+    def left_current(self):       return self.left_axis.motor.current_control.Ibus if self.left_axis  else 0 
+    def right_current(self):      return self.left_axis.motor.current_control.Ibus if self.right_axis else 0 
+

@@ -10,6 +10,7 @@ import tf2_ros
 from std_msgs.msg import Float64, Int32
 from geometry_msgs.msg import Twist, TransformStamped
 from nav_msgs.msg import Odometry
+from sensor_msgs.msg import JointState
 import std_srvs.srv
 
 import time
@@ -18,6 +19,7 @@ import traceback
 import Queue
 
 from odrive_interface import ODriveInterfaceAPI, ODriveFailure
+from odrive_simulator import ODriveInterfaceSimulator
 
 class ROSLogger(object):
     """Imitate a standard Python logger, but pass the messages to rospy logging.
@@ -62,9 +64,16 @@ class ODriveNode(object):
     connect_on_startup = False
     calibrate_on_startup = False
     engage_on_startup = False
-
+    
+    publish_joint_angles = True
+    # Simulation mode
+    # When enabled, output simulated odometry and joint angles (TODO: do joint angles anyway from ?)
+    sim_mode = False
     
     def __init__(self):
+        self.sim_mode             = rospy.get_param('simulation_mode', False)
+        self.publish_joint_angles = rospy.get_param('publish_joint_angles', True) # if self.sim_mode else False
+        
         self.axis_for_right = float(rospy.get_param('~axis_for_right', 0)) # if right calibrates first, this should be 0, else 1
         self.wheel_track = float(rospy.get_param('~wheel_track', 0.285)) # m, distance between wheel centres
         self.tyre_circumference = float(rospy.get_param('~tyre_circumference', 0.341)) # used to translate velocity commands in m/s into motor rpm
@@ -104,7 +113,7 @@ class ODriveNode(object):
             self.right_current_accumulator = 0.0
             self.current_publisher_left  = rospy.Publisher('odrive/left_current', Float64, queue_size=2)
             self.current_publisher_right = rospy.Publisher('odrive/right_current', Float64, queue_size=2)
-            rospy.loginfo("ODrive will publish motor currents.")
+            rospy.logdebug("ODrive will publish motor currents.")
         
         self.last_cmd_vel_time = rospy.Time.now()
         
@@ -156,6 +165,16 @@ class ODriveNode(object):
             self.tf_msg.transform.rotation.y = 0.0
             self.tf_msg.transform.rotation.w = 0.0
             self.tf_msg.transform.rotation.z = 1.0
+            
+        if self.publish_joint_angles:
+            self.joint_state_publisher = rospy.Publisher('/odrive/joint_states', JointState, queue_size=2)
+            
+            jsm = JointState()
+            self.joint_state_msg = jsm
+            #jsm.name.resize(2)
+            #jsm.position.resize(2)
+            jsm.name = ['joint_left_wheel','joint_right_wheel']
+            jsm.position = [0.0, 0.0]            
 
         
     def main_loop(self):
@@ -217,19 +236,19 @@ class ODriveNode(object):
         # Handle reading from Odrive and sending odometry
         if self.fast_timer_comms_active:
             try:
-                
                 # read all required values from ODrive for odometry
                 self.encoder_cpr = self.driver.encoder_cpr
                 self.m_s_to_value = self.encoder_cpr/self.tyre_circumference # calculated
                 
-                self.vel_l = self.driver.left_axis.encoder.vel_estimate  # units: encoder counts/s
-                self.vel_r = -self.driver.right_axis.encoder.vel_estimate # neg is forward for right
-                self.new_pos_l = self.driver.left_axis.encoder.pos_cpr    # units: encoder counts
-                self.new_pos_r = -self.driver.right_axis.encoder.pos_cpr  # sign!
+                self.driver.update_time(time_now.to_sec())
+                self.vel_l = self.driver.left_vel_estimate()   # units: encoder counts/s
+                self.vel_r = -self.driver.right_vel_estimate() # neg is forward for right
+                self.new_pos_l = self.driver.left_pos()        # units: encoder counts
+                self.new_pos_r = -self.driver.right_pos()      # sign!
                 
                 # for current
-                self.current_l = self.driver.left_axis.motor.current_control.Ibus
-                self.current_r = self.driver.right_axis.motor.current_control.Ibus
+                self.current_l = self.driver.left_current()
+                self.current_r = self.driver.right_current()
                 
             except:
                 rospy.logerr("Fast timer exception reading:" + traceback.format_exc())
@@ -241,7 +260,8 @@ class ODriveNode(object):
             self.publish_odometry(time_now)
         if self.publish_current:
             self.pub_current()
-            
+        if self.publish_joint_angles:
+            self.pub_joint_angles(time_now)
         
         try:
             # check and stop motor if no vel command has been received in > 1s
@@ -301,6 +321,8 @@ class ODriveNode(object):
     def connect_driver(self, request):
         if self.driver:
             return (False, "Already connected.")
+        
+        ODriveClass = ODriveInterfaceAPI if not self.sim_mode else ODriveInterfaceSimulator
         
         self.driver = ODriveInterfaceAPI(logger=ROSLogger())
         rospy.loginfo("Connecting to ODrive...")
@@ -540,7 +562,15 @@ class ODriveNode(object):
         self.odom_publisher.publish(self.odom_msg)
         if self.publish_tf:
             self.tf_publisher.sendTransform(self.tf_msg)            
-        
+    
+    def pub_joint_angles(self, time_now):
+        jsm = self.joint_state_msg
+        jsm.header.stamp = time_now
+        if self.driver:
+            jsm.position[0] = 2*math.pi * self.driver.left_pos()  / self.encoder_cpr
+            jsm.position[1] = 2*math.pi * self.driver.right_pos() / self.encoder_cpr
+            
+        self.joint_state_publisher.publish(jsm)
 
 def start_odrive():
     rospy.init_node('odrive')
