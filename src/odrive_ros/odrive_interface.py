@@ -33,8 +33,19 @@ class ODriveInterfaceAPI(object):
     _preroll_completed = False
     #engaged = False
     
-    def __init__(self, logger=None):
+    def __init__(self, logger=None, active_odrive=None):
         self.logger = logger if logger else default_logger
+        
+        if active_odrive: # pass in the odrv0 object from odrivetool shell to use it directly.
+            self.driver = active_odrive
+            self.axes = (self.driver.axis0, self.driver.axis1)
+            self.right_axis = self.driver.axis0 
+            self.left_axis  = self.driver.axis1
+            self.logger.info("Loaded pre-existing ODrive interface. Check index search status.")
+            self.encoder_cpr = self.driver.axis0.encoder.config.cpr
+            self.connected = True
+            self._preroll_started = False
+            self._preroll_completed = True
                 
     def __del__(self):
         self.disconnect()
@@ -152,11 +163,11 @@ class ODriveInterfaceAPI(object):
             for i, axis in enumerate(self.axes):
                 while axis.current_state != AXIS_STATE_IDLE:
                     time.sleep(0.1)
+            self._preroll_started = False
             for i, axis in enumerate(self.axes):
                 if axis.error != 0:
                     self.logger.error("Failed preroll with left_axis error 0x%x, motor error 0x%x" % (axis.error, axis.motor.error))
                     return False
-            self._preroll_started = False
             self._preroll_completed = True
             self.logger.info("Index search preroll complete.")
             return True
@@ -180,8 +191,9 @@ class ODriveInterfaceAPI(object):
                 # completed, check for errors before marking complete
                 for i, axis in enumerate(self.axes):
                     if axis.error != 0:
+                        self._preroll_started = False
                         error_str = "Failed preroll with axis error 0x%x, motor error 0x%x, encoder error 0x%x. Rebooting." % (axis.error, axis.motor.error, axis.encoder.error)
-                        self.driver.reboot()
+                        #self.driver.reboot()
                         self.logger.error(error_str)
                         raise Exception(error_str)
                 # no errors, success
