@@ -1,28 +1,25 @@
 # odrive_ros
 ROS driver for the [ODrive motor driver](https://odriverobotics.com/)
 
-This is a basic first pass at a ROS driver. It's Python-based, so not super-fast, but it'll get you started. Maybe in time this will have an optimised C++ version, but I woudn't count on it anytime soon. ;)
+This is a basic pass at a ROS driver to operate the ODrive as a differential drive. It's Python-based, so not super-fast, but it'll get you started. Maybe in time this will have an optimised C++ version, but I woudn't count on it anytime soon. ;)
 
-Future plans do include: 
-
-- pull encoder parameter back from ODrive rather than specifying it manually
-- publishing odometry back to ROS
+Future plans include adding a simulation mode so you can continue to use this driver in a simulation mode within gazebo.
 
 Feedback, issues and pull requests welcome.
 
 ## Usage
 
-As of September 7, 2018 the main ODrive repository doesn't support Python 2.7, so you will need to ensure the version you install has [my compatibility patch](https://github.com/madcowswe/ODrive/pull/199). Said patch is also is a bit rough around the edges, you will need to use the odrivetool for configuration according to the ODrive setup docs with `python2 odrivetool` instead of running it directly.
+You will need the main ODrive Python tools installed. (They added my patch with support for Python 2.7 a while back, so my fork isn't required any more.)
 
 To install:
 ```sh
 git clone https://github.com/neomanic/ODrive -b py27compat
 cd ODrive/tools
-sudo pip install monotonic
+sudo pip install monotonic # required for py < 3
 
 # sudo python setup.py install # doesn't work due to weird setup process, so do the following:
 python setup.py sdist
-sudo pip install dist/odrive-0.4.2.dev0.tar.gz
+sudo pip install dist/odrive-xxx.tar.gz
 ```
 
 then `rosrun odrive_ros odrive_node` will get you on your way. 
@@ -36,7 +33,7 @@ roscd odrive_ros
 sudo pip install -e .
 ```
 
-Fire up a Python shell. See below for the import which exposes the ODrive with setup and drive functions. You can use either ODriveInterfaceAPI (uses USB) or ODriveInterfaceSerial (requires the /dev/ttyUSBx corresponding to the ODrive as parameter, but not tested recently).
+If you want to use a bare Python shell, see below for the import which exposes the ODrive with setup and drive functions. You can use either ODriveInterfaceAPI (uses USB) or ODriveInterfaceSerial (requires the /dev/ttyUSBx corresponding to the ODrive as parameter, but not tested recently).
 
 ```python
 from odrive_ros import odrive_interface
@@ -47,6 +44,14 @@ od.engage()         # get ready to drive
 od.drive(1000,1000) # drive axis0 and axis1
 od.release()        # done
 ```
+
+You can now (as of v0.5) use this wrapper from within an `odrivetool shell`. Once the shell has launched and connected to your ODrive, run the following, then you can use the commands as if in a bare Python interactive session above, and still get the help provided by odrivetool.
+
+```python
+import odrive_interface
+od = odrive_interface.ODriveInterfaceAPI(active_odrive=odrv0)
+```
+
 
 ## Acknowledgements
 

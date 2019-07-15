@@ -1,4 +1,10 @@
 
+## 0.5.0 2019-07-15
+
+Added facility to import odrive_interface into an odrivetool shell for testing.
+More error checking and recovery.
+Initial work towards providing a simulation mode for use in gazebo.
+
 ## 0.4.0 2019-03-19
 
 Reworked all ODrive comms into a fast+slow thread. 
