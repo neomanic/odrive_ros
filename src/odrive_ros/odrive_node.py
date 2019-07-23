@@ -19,6 +19,7 @@ import traceback
 import Queue
 
 from odrive_interface import ODriveInterfaceAPI, ODriveFailure
+from odrive_interface import ChannelBrokenException, ChannelDamagedException
 from odrive_simulator import ODriveInterfaceSimulator
 
 class ROSLogger(object):
@@ -209,8 +210,10 @@ class ODriveNode(object):
                     else:
                         # must have called connect service from another node
                         self.fast_timer_comms_active = True
+                except (ChannelBrokenException, ChannelDamagedException, AttributeError):
+                    rospy.logerr("ODrive USB connection failure in main_loop.")
                 except:
-                    rospy.logerr("Errors accessing ODrive:" + traceback.format_exc())
+                    rospy.logerr("Unknown errors accessing ODrive:" + traceback.format_exc())
                     self.driver = None
             
             if not self.driver:
@@ -256,9 +259,12 @@ class ODriveNode(object):
                     # for current
                     self.current_l = self.driver.left_current()
                     self.current_r = self.driver.right_current()
-            
+            except (ChannelBrokenException, ChannelDamagedException):
+                rospy.logerr("ODrive USB connection failure in fast_timer." + traceback.format_exc(1))
+                self.fast_timer_comms_active = False
+                self.driver = None
             except:
-                rospy.logerr("Fast timer exception reading:" + traceback.format_exc())
+                rospy.logerr("Fast timer ODrive failure:" + traceback.format_exc())
                 self.fast_timer_comms_active = False
                 
         # odometry is published regardless of ODrive connection or failure (but assumed zero for those)
@@ -272,7 +278,8 @@ class ODriveNode(object):
         
         try:
             # check and stop motor if no vel command has been received in > 1s
-            if self.fast_timer_comms_active:
+            #if self.fast_timer_comms_active:
+            if self.driver:
                 if (time_now - self.last_cmd_vel_time).to_sec() > 0.5 and self.last_speed > 0:
                     self.driver.drive(0,0)
                     self.last_speed = 0
@@ -280,9 +287,14 @@ class ODriveNode(object):
                 # release motor after 10s stopped
                 if (time_now - self.last_cmd_vel_time).to_sec() > 10.0 and self.driver.engaged():
                     self.driver.release() # and release            
-        except:
-            rospy.logerr("Fast timer exception on cmd_vel timeout:" + traceback.format_exc())
+        except (ChannelBrokenException, ChannelDamagedException):
+            rospy.logerr("ODrive USB connection failure in cmd_vel timeout." + traceback.format_exc(1))
             self.fast_timer_comms_active = False
+            self.driver = None
+        except:
+            rospy.logerr("cmd_vel timeout unknown failure:" + traceback.format_exc())
+            self.fast_timer_comms_active = False
+
         
         # handle sending drive commands.
         # from here, any errors return to get out
@@ -309,9 +321,14 @@ class ODriveNode(object):
                     self.driver.drive(left_linear_val, right_linear_val)
                     self.last_speed = max(abs(left_linear_val), abs(right_linear_val))
                     self.last_cmd_vel_time = time_now
-                except:
-                    rospy.logerr("Fast timer exception on drive cmd:" + traceback.format_exc())
+                except (ChannelBrokenException, ChannelDamagedException):
+                    rospy.logerr("ODrive USB connection failure in drive_cmd." + traceback.format_exc(1))
                     self.fast_timer_comms_active = False
+                    self.driver = None
+                except:
+                    rospy.logerr("motor drive unknown failure:" + traceback.format_exc())
+                    self.fast_timer_comms_active = False
+
             elif motor_command[0] == 'release':
                 pass
             # ?
@@ -574,8 +591,8 @@ class ODriveNode(object):
         jsm = self.joint_state_msg
         jsm.header.stamp = time_now
         if self.driver:
-            jsm.position[0] = 2*math.pi * self.driver.left_pos()  / self.encoder_cpr
-            jsm.position[1] = 2*math.pi * self.driver.right_pos() / self.encoder_cpr
+            jsm.position[0] = 2*math.pi * self.new_pos_l  / self.encoder_cpr
+            jsm.position[1] = 2*math.pi * self.new_pos_r / self.encoder_cpr
             
         self.joint_state_publisher.publish(jsm)
 

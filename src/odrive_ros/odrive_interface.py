@@ -10,6 +10,7 @@ import odrive
 from odrive.enums import *
 
 import fibre
+from fibre import ChannelBrokenException, ChannelDamagedException
 
 default_logger = logging.getLogger(__name__)
 default_logger.setLevel(logging.DEBUG)
@@ -72,7 +73,8 @@ class ODriveInterfaceAPI(object):
         for axis in [self.right_axis, self.left_axis]:
             if axis.error != 0:
                 error_str = "Had error on startup, rebooting. Axis error 0x%x, motor error 0x%x, encoder error 0x%x. Rebooting." % (axis.error, axis.motor.error, axis.encoder.error)
-                self.driver.reboot()
+                self.logger.error(error_str)
+                self.reboot()
                 return False
         
         self.encoder_cpr = self.driver.axis0.encoder.config.cpr
@@ -114,12 +116,12 @@ class ODriveInterfaceAPI(object):
         if not self.driver:
             self.logger.error("Not connected.")
             return False
-        
         try:
             self.driver.reboot()
+        except KeyError:
+            self.logger.error("Rebooted ODrive.")
         except:
             self.logger.error("Failed to reboot: " + traceback.format_exc())
-            return False
         finally:
             self.driver = None
         return True
@@ -192,14 +194,14 @@ class ODriveInterfaceAPI(object):
                 for i, axis in enumerate(self.axes):
                     if axis.error != 0:
                         self._preroll_started = False
-                        error_str = "Failed preroll with axis error 0x%x, motor error 0x%x, encoder error 0x%x. Rebooting." % (axis.error, axis.motor.error, axis.encoder.error)
-                        #self.driver.reboot()
+                        error_str = "Failed index search preroll with axis error 0x%x, motor error 0x%x, encoder error 0x%x. Rebooting." % (axis.error, axis.motor.error, axis.encoder.error)
+                        #self.reboot()
                         self.logger.error(error_str)
                         raise Exception(error_str)
                 # no errors, success
                 self._preroll_started = False
                 self._preroll_completed = True
-                self.logger.info("Preroll complete.")
+                self.logger.info("Index search preroll complete. Ready to drive.")
                 return True
             else:
                 # still prerolling
@@ -210,10 +212,10 @@ class ODriveInterfaceAPI(object):
             return False
     
     def engaged(self):
-        return self.axes[0].current_state == AXIS_STATE_CLOSED_LOOP_CONTROL or self.axes[1].current_state == AXIS_STATE_CLOSED_LOOP_CONTROL
+        return self.axes[0].current_state == AXIS_STATE_CLOSED_LOOP_CONTROL and self.axes[1].current_state == AXIS_STATE_CLOSED_LOOP_CONTROL if self.driver else False
     
     def idle(self):
-        return self.axes[0].current_state == AXIS_STATE_IDLE and self.axes[1].current_state == AXIS_STATE_IDLE
+        return self.axes[0].current_state == AXIS_STATE_IDLE and self.axes[1].current_state == AXIS_STATE_IDLE if self.driver else False
         
     def engage(self):
         if not self.driver:
