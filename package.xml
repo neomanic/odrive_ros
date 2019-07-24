@@ -1,7 +1,7 @@
 <?xml version="1.0"?>
 <package format="2">
   <name>odrive_ros</name>
-  <version>0.5.0</version>
+  <version>0.6.0</version>
   <description>ODrive motor controller driver for ROS</description>
   <license>Modified BSD</license>
 
