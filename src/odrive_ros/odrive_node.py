@@ -246,6 +246,8 @@ class ODriveNode(object):
                 if error_string:
                     self.fast_timer_comms_active = False
                 else:
+                    # reset watchdog
+                    self.driver.feed_watchdog()
                     # read all required values from ODrive for odometry
                     self.encoder_cpr = self.driver.encoder_cpr
                     self.m_s_to_value = self.encoder_cpr/self.tyre_circumference # calculated

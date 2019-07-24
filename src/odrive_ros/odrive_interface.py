@@ -212,10 +212,16 @@ class ODriveInterfaceAPI(object):
             return False
     
     def engaged(self):
-        return self.axes[0].current_state == AXIS_STATE_CLOSED_LOOP_CONTROL and self.axes[1].current_state == AXIS_STATE_CLOSED_LOOP_CONTROL if self.driver else False
+        if self.driver and hasattr(self, 'axes'):
+            return self.axes[0].current_state == AXIS_STATE_CLOSED_LOOP_CONTROL and self.axes[1].current_state == AXIS_STATE_CLOSED_LOOP_CONTROL
+        else:
+            return False
     
     def idle(self):
-        return self.axes[0].current_state == AXIS_STATE_IDLE and self.axes[1].current_state == AXIS_STATE_IDLE if self.driver else False
+        if self.driver and hasattr(self, 'axes'):
+            return self.axes[0].current_state == AXIS_STATE_IDLE and self.axes[1].current_state == AXIS_STATE_IDLE
+        else:
+            return False
         
     def engage(self):
         if not self.driver:
@@ -251,6 +257,10 @@ class ODriveInterfaceAPI(object):
         self.right_axis.controller.vel_setpoint = -right_motor_val
         #except (fibre.protocol.ChannelBrokenException, AttributeError) as e:
         #    raise ODriveFailure(str(e))
+        
+    def feed_watchdog(self):
+        self.left_axis.watchdog_feed()
+        self.right_axis.watchdog_feed()
         
     def get_errors(self, clear=True):
         # TODO: add error parsing, see: https://github.com/madcowswe/ODrive/blob/master/tools/odrive/utils.py#L34
