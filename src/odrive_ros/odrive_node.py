@@ -74,6 +74,7 @@ class ODriveNode(object):
     def __init__(self):
         self.sim_mode             = rospy.get_param('simulation_mode', False)
         self.publish_joint_angles = rospy.get_param('publish_joint_angles', True) # if self.sim_mode else False
+        self.publish_temperatures = rospy.get_param('publish_temperatures', True)
         
         self.axis_for_right = float(rospy.get_param('~axis_for_right', 0)) # if right calibrates first, this should be 0, else 1
         self.wheel_track = float(rospy.get_param('~wheel_track', 0.285)) # m, distance between wheel centres
@@ -108,21 +109,25 @@ class ODriveNode(object):
         self.command_queue = Queue.Queue(maxsize=5)
         self.vel_subscribe = rospy.Subscriber("/cmd_vel", Twist, self.cmd_vel_callback, queue_size=2)
         
+        if self.publish_temperatures:
+            self.temperature_publisher_left  = rospy.Publisher('left/temperature', Float64, queue_size=2)
+            self.temperature_publisher_right = rospy.Publisher('right/temperature', Float64, queue_size=2)
+        
         if self.publish_current:
             self.current_loop_count = 0
             self.left_current_accumulator  = 0.0
             self.right_current_accumulator = 0.0
-            self.current_publisher_left  = rospy.Publisher('odrive/left_current', Float64, queue_size=2)
-            self.current_publisher_right = rospy.Publisher('odrive/right_current', Float64, queue_size=2)
+            self.current_publisher_left  = rospy.Publisher('left/current', Float64, queue_size=2)
+            self.current_publisher_right = rospy.Publisher('right/current', Float64, queue_size=2)
             rospy.logdebug("ODrive will publish motor currents.")
         
         self.last_cmd_vel_time = rospy.Time.now()
         
         if self.publish_raw_odom:
-            self.raw_odom_publisher_encoder_left  = rospy.Publisher('odrive/raw_odom/encoder_left',   Int32, queue_size=2) if self.publish_raw_odom else None
-            self.raw_odom_publisher_encoder_right = rospy.Publisher('odrive/raw_odom/encoder_right',  Int32, queue_size=2) if self.publish_raw_odom else None
-            self.raw_odom_publisher_vel_left      = rospy.Publisher('odrive/raw_odom/velocity_left',  Int32, queue_size=2) if self.publish_raw_odom else None
-            self.raw_odom_publisher_vel_right     = rospy.Publisher('odrive/raw_odom/velocity_right', Int32, queue_size=2) if self.publish_raw_odom else None
+            self.raw_odom_publisher_encoder_left  = rospy.Publisher('left/raw_odom/encoder',   Int32, queue_size=2) if self.publish_raw_odom else None
+            self.raw_odom_publisher_encoder_right = rospy.Publisher('right/raw_odom/encoder',  Int32, queue_size=2) if self.publish_raw_odom else None
+            self.raw_odom_publisher_vel_left      = rospy.Publisher('left/raw_odom/velocity',  Int32, queue_size=2) if self.publish_raw_odom else None
+            self.raw_odom_publisher_vel_right     = rospy.Publisher('right/raw_odom/velocity', Int32, queue_size=2) if self.publish_raw_odom else None
                             
         if self.publish_odom:
             rospy.Service('reset_odometry',    std_srvs.srv.Trigger, self.reset_odometry)
@@ -237,6 +242,8 @@ class ODriveNode(object):
         self.new_pos_r = 0
         self.current_l = 0
         self.current_r = 0
+        self.temp_v_l = 0.
+        self.temp_v_r = 0.
         
         # Handle reading from Odrive and sending odometry
         if self.fast_timer_comms_active:
@@ -257,7 +264,10 @@ class ODriveNode(object):
                     self.vel_r = -self.driver.right_vel_estimate() # neg is forward for right
                     self.new_pos_l = self.driver.left_pos()        # units: encoder counts
                     self.new_pos_r = -self.driver.right_pos()      # sign!
-                
+                    
+                    # for temperatures
+                    self.temp_v_l = self.driver.left_temperature()
+                    self.temp_v_r = self.driver.right_temperature()
                     # for current
                     self.current_l = self.driver.left_current()
                     self.current_r = self.driver.right_current()
@@ -272,7 +282,9 @@ class ODriveNode(object):
         # odometry is published regardless of ODrive connection or failure (but assumed zero for those)
         # as required by SLAM
         if self.publish_odom:
-            self.publish_odometry(time_now)
+            self.pub_odometry(time_now)
+        if self.publish_temperatures:
+            self.pub_temperatures()
         if self.publish_current:
             self.pub_current()
         if self.publish_joint_angles:
@@ -477,6 +489,27 @@ class ODriveNode(object):
             pass
             
         self.last_cmd_vel_time = rospy.Time.now()
+        
+    def pub_temperatures(self):
+        # https://discourse.odriverobotics.com/t/odrive-mosfet-temperature-rise-measurements-using-the-onboard-thermistor/972
+        # https://discourse.odriverobotics.com/t/thermistors-on-the-odrive/813/7
+        # https://www.digikey.com/product-detail/en/murata-electronics-north-america/NCP15XH103F03RC/490-4801-1-ND/1644682
+        p3 =  363.0
+        p2 = -459.2
+        p1 =  308.3
+        p0 =  -28.1
+        
+        vl = self.temp_v_l
+        vr = self.temp_v_r
+
+        temperature_l = p3*vl**3 + p2*vl**2 + p1*vl + p0
+        temperature_r = p3*vr**3 + p2*vr**2 + p1*vr + p0
+        
+        #print(temperature_l, temperature_r)
+        
+        self.temperature_publisher_left.publish(temperature_l)
+        self.temperature_publisher_right.publish(temperature_r)
+        
                 
     def pub_current(self):
         current_quantizer = 5
@@ -493,7 +526,7 @@ class ODriveNode(object):
             self.left_current_accumulator = 0.0
             self.right_current_accumulator = 0.0
 
-    def publish_odometry(self, time_now):
+    def pub_odometry(self, time_now):
         now = time_now
         self.odom_msg.header.stamp = now
         self.tf_msg.header.stamp = now
