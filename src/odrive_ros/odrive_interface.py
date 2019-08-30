@@ -291,8 +291,8 @@ class ODriveInterfaceAPI(object):
     def right_pos(self):          return self.right_axis.encoder.pos_cpr       if self.right_axis else 0   # sign!
 
     # TODO check these match the right motors, but it doesn't matter for now
-    def left_temperature(self):   self.driver.get_adc_voltage(4) if self.left_axis  else 0.
-    def right_temperature(self):  self.driver.get_adc_voltage(15)  if self.right_axis else 0.
+    def left_temperature(self):   return self.left_axis.motor.get_inverter_temp()  if self.left_axis  else 0.
+    def right_temperature(self):  return self.right_axis.motor.get_inverter_temp() if self.right_axis else 0.
     
     def left_current(self):       return self.left_axis.motor.current_control.Ibus if self.left_axis  else 0
     def right_current(self):      return self.left_axis.motor.current_control.Ibus if self.right_axis else 0 

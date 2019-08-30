@@ -217,6 +217,7 @@ class ODriveNode(object):
                         self.fast_timer_comms_active = True
                 except (ChannelBrokenException, ChannelDamagedException, AttributeError):
                     rospy.logerr("ODrive USB connection failure in main_loop.")
+                    self.driver = None
                 except:
                     rospy.logerr("Unknown errors accessing ODrive:" + traceback.format_exc())
                     self.driver = None
@@ -494,21 +495,21 @@ class ODriveNode(object):
         # https://discourse.odriverobotics.com/t/odrive-mosfet-temperature-rise-measurements-using-the-onboard-thermistor/972
         # https://discourse.odriverobotics.com/t/thermistors-on-the-odrive/813/7
         # https://www.digikey.com/product-detail/en/murata-electronics-north-america/NCP15XH103F03RC/490-4801-1-ND/1644682
-        p3 =  363.0
-        p2 = -459.2
-        p1 =  308.3
-        p0 =  -28.1
-        
-        vl = self.temp_v_l
-        vr = self.temp_v_r
+        #p3 =  363.0
+        #p2 = -459.2
+        #p1 =  308.3
+        #p0 =  -28.1
+        #
+        #vl = self.temp_v_l
+        #vr = self.temp_v_r
 
-        temperature_l = p3*vl**3 + p2*vl**2 + p1*vl + p0
-        temperature_r = p3*vr**3 + p2*vr**2 + p1*vr + p0
+        #temperature_l = p3*vl**3 + p2*vl**2 + p1*vl + p0
+        #temperature_r = p3*vr**3 + p2*vr**2 + p1*vr + p0
         
         #print(temperature_l, temperature_r)
         
-        self.temperature_publisher_left.publish(temperature_l)
-        self.temperature_publisher_right.publish(temperature_r)
+        self.temperature_publisher_left.publish(self.temp_v_l)
+        self.temperature_publisher_right.publish(self.temp_v_r)
         
                 
     def pub_current(self):
