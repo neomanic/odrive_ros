@@ -210,6 +210,9 @@ class ODriveInterfaceAPI(object):
             #self.logger.info("Preroll started.")
             self.preroll(wait=False)
             return False
+            
+    def has_prerolled(self):
+        return self._preroll_completed
     
     def engaged(self):
         if self.driver and hasattr(self, 'axes'):
