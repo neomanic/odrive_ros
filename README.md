@@ -9,11 +9,11 @@ Feedback, issues and pull requests welcome.
 
 ## Usage
 
-You will need the main ODrive Python tools installed. (They added my patch with support for Python 2.7 a while back, so my fork isn't required any more.)
+You will need the main ODrive Python tools installed.
 
 To install:
 ```sh
-git clone https://github.com/neomanic/ODrive -b py27compat
+git clone https://github.com/madcowswe/ODrive
 cd ODrive/tools
 sudo pip install monotonic # required for py < 3
 
