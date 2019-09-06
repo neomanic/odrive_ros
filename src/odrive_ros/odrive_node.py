@@ -7,6 +7,7 @@ import tf.transformations
 import tf_conversions
 import tf2_ros
 
+import std_msgs.msg
 from std_msgs.msg import Float64, Int32
 from geometry_msgs.msg import Twist, TransformStamped
 from nav_msgs.msg import Odometry
@@ -105,6 +106,9 @@ class ODriveNode(object):
         rospy.Service('calibrate_motors_reverse', std_srvs.srv.Trigger, self.calibrate_motor_reverse)
         rospy.Service('engage_motors',            std_srvs.srv.Trigger, self.engage_motor)
         rospy.Service('release_motors',           std_srvs.srv.Trigger, self.release_motor)
+        
+        self.status_pub = rospy.Publisher('status', std_msgs.msg.String, latch=True)
+        self.status_pub.publish("disconnected")
         
         self.command_queue = Queue.Queue(maxsize=5)
         self.vel_subscribe = rospy.Subscriber("/cmd_vel", Twist, self.cmd_vel_callback, queue_size=2)
@@ -206,20 +210,24 @@ class ODriveNode(object):
             if self.driver:
                 try:
                     # driver connected, but fast_comms not active -> must be an error?
+                    # TODO: try resetting errors and recalibrating, not just a full disconnection
                     error_string = self.driver.get_errors(clear=True)
                     if error_string:
                         rospy.logerr("Had errors, disconnecting and retrying connection.")
                         rospy.logerr(error_string)
                         self.driver.disconnect()
+                        self.status_pub.publish("disconnected")
                         self.driver = None
                     else:
                         # must have called connect service from another node
                         self.fast_timer_comms_active = True
                 except (ChannelBrokenException, ChannelDamagedException, AttributeError):
                     rospy.logerr("ODrive USB connection failure in main_loop.")
+                    self.status_pub.publish("disconnected")
                     self.driver = None
                 except:
                     rospy.logerr("Unknown errors accessing ODrive:" + traceback.format_exc())
+                    self.status_pub.publish("disconnected")
                     self.driver = None
             
             if not self.driver:
@@ -275,6 +283,7 @@ class ODriveNode(object):
             except (ChannelBrokenException, ChannelDamagedException):
                 rospy.logerr("ODrive USB connection failure in fast_timer." + traceback.format_exc(1))
                 self.fast_timer_comms_active = False
+                self.status_pub.publish("disconnected")
                 self.driver = None
             except:
                 rospy.logerr("Fast timer ODrive failure:" + traceback.format_exc())
@@ -317,7 +326,7 @@ class ODriveNode(object):
             # check to see if we're initialised and engaged motor
             try:
                 if not self.driver.has_prerolled(): #ensure_prerolled():
-                    rospy.logwarn_throttle(1.0, "ODrive has not been prerolled, ignoring drive command.")
+                    rospy.logwarn_throttle(5.0, "ODrive has not been prerolled, ignoring drive command.")
                     motor_command = self.command_queue.get_nowait()
                     return
             except:
@@ -383,6 +392,7 @@ class ODriveNode(object):
         
         self.fast_timer_comms_active = True
         
+        self.status_pub.publish("connected")
         return (True, "ODrive connected successfully")
     
     def disconnect_driver(self, request):
@@ -395,6 +405,7 @@ class ODriveNode(object):
         except:
             rospy.logerr('Error while disconnecting: {}'.format(traceback.format_exc()))
         finally:
+            self.status_pub.publish("disconnected")
             self.driver = None
         return (True, "Disconnection success.")
     
@@ -405,7 +416,9 @@ class ODriveNode(object):
             
         if self.has_preroll:
             if not self.driver.preroll(wait=True, reverse=False):
-                return (False, "Failed preroll.")        
+                self.status_pub.publish("preroll_fail")
+                return (False, "Failed preroll.")
+            self.status_pub.publish("ready")
         else:
             if not self.driver.calibrate():
                 return (False, "Failed calibration.")
@@ -430,6 +443,8 @@ class ODriveNode(object):
         if not self.driver:
             rospy.logerr("Not connected.")
             return (False, "Not connected.")
+        if not self.driver.has_prerolled():
+            return (False, "Not prerolled.")
         if not self.driver.engage():
             return (False, "Failed to engage motor.")
         return (True, "Engage motor success.")
