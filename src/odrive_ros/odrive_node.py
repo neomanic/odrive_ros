@@ -112,6 +112,10 @@ class ODriveNode(object):
         rospy.Service('engage_motors',            std_srvs.srv.Trigger, self.engage_motor)
         rospy.Service('release_motors',           std_srvs.srv.Trigger, self.release_motor)
         
+        # odometry update, disable during preroll, whenever wheels off ground 
+        self.odometry_update_enabled = True
+        rospy.Service('enable_odometry_updates', std_srvs.srv.SetBool, self.enable_odometry_update_service)
+        
         self.status_pub = rospy.Publisher('status', std_msgs.msg.String, latch=True)
         self.status_pub.publish("disconnected")
         
@@ -420,10 +424,12 @@ class ODriveNode(object):
             return (False, "Not connected.")
             
         if self.has_preroll:
+            self.odometry_update_enabled = False # disable odometry updates while we preroll
             if not self.driver.preroll(wait=True, reverse=False):
                 self.status_pub.publish("preroll_fail")
                 return (False, "Failed preroll.")
             self.status_pub.publish("ready")
+            self.odometry_update_enabled = True
         else:
             if not self.driver.calibrate():
                 return (False, "Failed calibration.")
@@ -462,6 +468,15 @@ class ODriveNode(object):
             return (False, "Failed to release motor.")
         return (True, "Release motor success.")
         
+    def enable_odometry_update_service(self, request):
+        enable = request.data
+        
+        if enable:
+            self.odometry_update_enabled = True
+            return(True, "Odometry enabled.")
+        else:
+            self.odometry_update_enabled = False
+            return(True, "Odometry disabled.")
     
     def reset_odometry(self, request):
         self.x = 0.0
@@ -557,7 +572,23 @@ class ODriveNode(object):
         wheel_track = self.wheel_track   # check these. Values in m
         tyre_circumference = self.tyre_circumference
         # self.m_s_to_value = encoder_cpr/tyre_circumference set earlier
-    
+        
+        # if odometry updates disabled, just return the old position and zero twist.
+        if not self.odometry_update_enabled:
+            self.odom_msg.twist.twist.linear.x = 0.
+            self.odom_msg.twist.twist.angular.z = 0.
+            
+            # but update the old encoder positions, so when we restart updates
+            # it will start by giving zero change from the old position.
+            self.old_pos_l = self.new_pos_l
+            self.old_pos_r = self.new_pos_r
+            
+            self.odom_publisher.publish(self.odom_msg)
+            if self.publish_tf:
+                self.tf_publisher.sendTransform(self.tf_msg)
+            
+            return
+        
         # Twist/velocity: calculated from motor values only
         s = tyre_circumference * (self.vel_l+self.vel_r) / (2.0*self.encoder_cpr)
         w = tyre_circumference * (self.vel_r-self.vel_l) / (wheel_track * self.encoder_cpr) # angle: vel_r*tyre_radius - vel_l*tyre_radius
