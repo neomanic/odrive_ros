@@ -49,6 +49,11 @@ class ROSLogger(object):
 
 # 1 m/s = 3.6 km/hr
 
+def get_param(name, default):
+    val = rospy.get_param(name, default)
+    rospy.loginfo('  %s: %s', name, str(val))
+    return val
+
 class ODriveNode(object):
     last_speed = 0.0
     driver = None
@@ -73,29 +78,29 @@ class ODriveNode(object):
     sim_mode = False
     
     def __init__(self):
-        self.sim_mode             = rospy.get_param('simulation_mode', False)
-        self.publish_joint_angles = rospy.get_param('publish_joint_angles', True) # if self.sim_mode else False
-        self.publish_temperatures = rospy.get_param('publish_temperatures', True)
+        self.sim_mode             = get_param('simulation_mode', False)
+        self.publish_joint_angles = get_param('publish_joint_angles', True) # if self.sim_mode else False
+        self.publish_temperatures = get_param('publish_temperatures', True)
         
-        self.axis_for_right = float(rospy.get_param('~axis_for_right', 0)) # if right calibrates first, this should be 0, else 1
-        self.wheel_track = float(rospy.get_param('~wheel_track', 0.285)) # m, distance between wheel centres
-        self.tyre_circumference = float(rospy.get_param('~tyre_circumference', 0.341)) # used to translate velocity commands in m/s into motor rpm
+        self.axis_for_right = float(get_param('~axis_for_right', 0)) # if right calibrates first, this should be 0, else 1
+        self.wheel_track = float(get_param('~wheel_track', 0.285)) # m, distance between wheel centres
+        self.tyre_circumference = float(get_param('~tyre_circumference', 0.341)) # used to translate velocity commands in m/s into motor rpm
         
-        self.connect_on_startup   = rospy.get_param('~connect_on_startup', False)
-        #self.calibrate_on_startup = rospy.get_param('~calibrate_on_startup', False)
-        #self.engage_on_startup    = rospy.get_param('~engage_on_startup', False)
+        self.connect_on_startup   = get_param('~connect_on_startup', False)
+        #self.calibrate_on_startup = get_param('~calibrate_on_startup', False)
+        #self.engage_on_startup    = get_param('~engage_on_startup', False)
         
-        self.has_preroll     = rospy.get_param('~use_preroll', True)
+        self.has_preroll     = get_param('~use_preroll', True)
                 
-        self.publish_current = rospy.get_param('~publish_current', True)
-        self.publish_raw_odom =rospy.get_param('~publish_raw_odom', True)
+        self.publish_current = get_param('~publish_current', True)
+        self.publish_raw_odom =get_param('~publish_raw_odom', True)
         
-        self.publish_odom    = rospy.get_param('~publish_odom', True)
-        self.publish_tf      = rospy.get_param('~publish_odom_tf', False)
-        self.odom_topic      = rospy.get_param('~odom_topic', "odom")
-        self.odom_frame      = rospy.get_param('~odom_frame', "odom")
-        self.base_frame      = rospy.get_param('~base_frame', "base_link")
-        self.odom_calc_hz    = rospy.get_param('~odom_calc_hz', 10)
+        self.publish_odom    = get_param('~publish_odom', True)
+        self.publish_tf      = get_param('~publish_odom_tf', False)
+        self.odom_topic      = get_param('~odom_topic', "odom")
+        self.odom_frame      = get_param('~odom_frame', "odom")
+        self.base_frame      = get_param('~base_frame', "base_link")
+        self.odom_calc_hz    = get_param('~odom_calc_hz', 10)
         
         rospy.on_shutdown(self.terminate)
 
