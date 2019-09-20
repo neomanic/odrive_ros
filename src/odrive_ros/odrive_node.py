@@ -429,6 +429,7 @@ class ODriveNode(object):
                 self.status_pub.publish("preroll_fail")
                 return (False, "Failed preroll.")
             self.status_pub.publish("ready")
+            rospy.sleep(1)
             self.odometry_update_enabled = True
         else:
             if not self.driver.calibrate():
@@ -444,6 +445,7 @@ class ODriveNode(object):
         if self.has_preroll:
             if not self.driver.preroll(wait=True, reverse=True):
                 return (False, "Failed preroll.")        
+            rospy.sleep(1)
         else:
             if not self.driver.calibrate():
                 return (False, "Failed calibration.")

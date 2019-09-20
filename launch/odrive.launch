@@ -4,8 +4,8 @@
     <arg name="calibrate_on_startup" default="true"/>
     <arg name="engage_on_startup"    default="true"/>
 
-    <arg name="publish_odom"   default="true"/>
-    <arg name="publish_tf"     default="false"/>
+    <arg name="publish_odom"        default="true"/>
+    <arg name="publish_odom_tf"     default="false"/>
     
     <arg name="output"   default="screen"/>
     <arg name="respawn"   default="false"/>
@@ -19,7 +19,7 @@
         <param name="calibrate_on_startup" value="$(arg calibrate_on_startup)"/>
         <param name="engage_on_startup"    value="$(arg engage_on_startup)"/>
         
-        <param name="publish_odom"    value="$(arg publish_odom)"/>
-        <param name="publish_tf"      value="$(arg publish_tf)"/>
+        <param name="publish_odom"         value="$(arg publish_odom)"/>
+        <param name="publish_odom_tf"      value="$(arg publish_odom_tf)"/>
     </node>
 </launch>
