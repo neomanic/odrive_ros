@@ -80,13 +80,8 @@ class ODriveInterfaceAPI(object):
         self.encoder_cpr = self.driver.axis0.encoder.config.cpr
         
         self.connected = True
-        self.logger.info("Connected to ODrive. Hardware v%d.%d-%d, Firmware v%d.%d.%d%s, SDK v%s" % (
-                        self.driver.hw_version_major, self.driver.hw_version_minor, self.driver.hw_version_variant,
-                        self.driver.fw_version_major, self.driver.fw_version_minor, self.driver.fw_version_revision,
-                        "-dev" if self.driver.fw_version_unreleased else "",
-                        odrive.version.get_version_str(),
-                        ))
-                        
+        self.logger.info("Connected to ODrive. " + self.get_version_string())
+        
         self._preroll_started = False
         self._preroll_completed = False
         
@@ -111,6 +106,17 @@ class ODriveInterfaceAPI(object):
         finally:
             self.driver = None
         return True
+        
+    def get_version_string(self):
+        if not self.driver or not self.connected:
+            return "Not connected."
+        return "ODrive %s, hw v%d.%d-%d, fw v%d.%d.%d%s, sdk v%s" % (
+            str(self.driver.serial_number),
+            self.driver.hw_version_major, self.driver.hw_version_minor, self.driver.hw_version_variant,
+            self.driver.fw_version_major, self.driver.fw_version_minor, self.driver.fw_version_revision,
+            "-dev" if self.driver.fw_version_unreleased else "",
+            odrive.version.get_version_str())
+        
         
     def reboot(self):
         if not self.driver:
@@ -145,7 +151,7 @@ class ODriveInterfaceAPI(object):
                 
         return True
         
-    def preroll(self, wait=True, reverse=False):
+    def preroll(self, wait=True):
         if not self.driver:
             self.logger.error("Not connected.")
             return False
@@ -292,11 +298,31 @@ class ODriveInterfaceAPI(object):
     def right_vel_estimate(self): return self.right_axis.encoder.vel_estimate  if self.right_axis else 0 # neg is forward for right
     def left_pos(self):           return self.left_axis.encoder.pos_cpr        if self.left_axis  else 0  # units: encoder counts
     def right_pos(self):          return self.right_axis.encoder.pos_cpr       if self.right_axis else 0   # sign!
-
+    
     # TODO check these match the right motors, but it doesn't matter for now
     def left_temperature(self):   return self.left_axis.motor.get_inverter_temp()  if self.left_axis  else 0.
     def right_temperature(self):  return self.right_axis.motor.get_inverter_temp() if self.right_axis else 0.
     
-    def left_current(self):       return self.left_axis.motor.current_control.Ibus if self.left_axis  else 0
-    def right_current(self):      return self.left_axis.motor.current_control.Ibus if self.right_axis else 0 
-
+    def left_current(self):       return self.left_axis.motor.current_control.Ibus  if self.left_axis and self.left_axis.current_state > 1 else 0.
+    def right_current(self):      return self.right_axis.motor.current_control.Ibus if self.right_axis and self.right_axis.current_state > 1 else 0.
+    
+    # from axis.hpp: https://github.com/madcowswe/ODrive/blob/767a2762f9b294b687d761029ef39e742bdf4539/Firmware/MotorControl/axis.hpp#L26
+    MOTOR_STATES = [
+        "UNDEFINED",                  #<! will fall through to idle
+        "IDLE",                       #<! disable PWM and do nothing
+        "STARTUP_SEQUENCE",           #<! the actual sequence is defined by the config.startup_... flags
+        "FULL_CALIBRATION_SEQUENCE",  #<! run all calibration procedures, then idle
+        "MOTOR_CALIBRATION",          #//<! run motor calibration
+        "SENSORLESS_CONTROL",         #//<! run sensorless control
+        "ENCODER_INDEX_SEARCH",       #//<! run encoder index search
+        "ENCODER_OFFSET_CALIBRATION", #//<! run encoder offset calibration
+        "CLOSED_LOOP_CONTROL",        #//<! run closed loop control
+        "LOCKIN_SPIN",                #//<! run lockin spin
+        "ENCODER_DIR_FIND",
+        ]
+        
+    def left_state(self):       return self.MOTOR_STATES[self.left_axis.current_state] if self.left_axis else "NOT_CONNECTED"
+    def right_state(self):      return self.MOTOR_STATES[self.right_axis.current_state] if self.right_axis else "NOT_CONNECTED"
+    
+    def bus_voltage(self):      return self.driver.vbus_voltage if self.left_axis else 0.
+    

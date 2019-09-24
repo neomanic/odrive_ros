@@ -1,7 +1,7 @@
 <?xml version="1.0"?>
 <package format="2">
   <name>odrive_ros</name>
-  <version>0.7.0</version>
+  <version>0.8.0</version>
   <description>ODrive motor controller driver for ROS</description>
   <license>Modified BSD</license>
 
@@ -17,6 +17,9 @@
   <exec_depend>geometry_msgs</exec_depend>
   <exec_depend>nav_msgs</exec_depend>
   <exec_depend>std_srvs</exec_depend>
+  <exec_depend>diagnostic_msgs</exec_depend>
+  <exec_depend>diagnostic_updater</exec_depend>
+  
   <exec_depend>ODrive</exec_depend>
 
   <export>
