@@ -1,3 +1,7 @@
+## 0.8.0 2019-09-24
+
+Publish diagnostics, including status from 0.7.0 and motor state.
+
 ## 0.7.0 2019-09-06
 
 Backed out automatic preroll, it's now done manually under user control.
