@@ -1,3 +1,7 @@
+## 0.8.1 2019-09-25
+
+Add i2t calculation to diagnostics.
+
 ## 0.8.0 2019-09-24
 
 Publish diagnostics, including status from 0.7.0 and motor state.

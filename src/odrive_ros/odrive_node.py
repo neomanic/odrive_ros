@@ -142,6 +142,9 @@ class ODriveNode(object):
             #self.right_current_accumulator = 0.0
             self.current_publisher_left  = rospy.Publisher('left/current', Float64, queue_size=2)
             self.current_publisher_right = rospy.Publisher('right/current', Float64, queue_size=2)
+            self.i2t_publisher_left  = rospy.Publisher('left/i2t', Float64, queue_size=2)
+            self.i2t_publisher_right = rospy.Publisher('right/i2t', Float64, queue_size=2)
+            
             rospy.logdebug("ODrive will publish motor currents.")
         
         self.last_cmd_vel_time = rospy.Time.now()
@@ -399,8 +402,8 @@ class ODriveNode(object):
             # ?
             else:
                 pass
-            
-        
+    
+    
     def terminate(self):
         self.fast_timer.shutdown()
         if self.driver:
@@ -550,24 +553,34 @@ class ODriveNode(object):
         self.last_cmd_vel_time = rospy.Time.now()
         
     def pub_diagnostics(self, stat):
-        #stat.add("Main Battery (V):", diag.main_battery_v)
+        stat.add("Status", self.status)
+        stat.add("Motor state L", self.motor_state_l) 
+        stat.add("Motor state R", self.motor_state_r)
+        stat.add("FET temp L (C)", round(self.temp_v_l,1))
+        stat.add("FET temp R (C)", round(self.temp_v_r,1))
+        stat.add("Motor temp L (C)", "unimplemented")
+        stat.add("Motor temp R (C)", "unimplemented")
+        stat.add("Motor current L (A)", round(self.current_l,1))
+        stat.add("Motor current R (A)", round(self.current_r,1))
+        stat.add("Voltage (V)", round(self.bus_voltage,2))
+        stat.add("Motor i2t L", round(self.left_energy_acc,1))
+        stat.add("Motor i2t R", round(self.right_energy_acc,1))
         
         # https://github.com/ros/common_msgs/blob/jade-devel/diagnostic_msgs/msg/DiagnosticStatus.msg
         if self.status == "disconnected":
             stat.summary(diagnostic_msgs.msg.DiagnosticStatus.WARN, "Not connected")
         else:
-            stat.summary(diagnostic_msgs.msg.DiagnosticStatus.OK, "Running")
-                
-        stat.add("Status:", self.status)
-        stat.add("Motor state L:", self.motor_state_l) 
-        stat.add("Motor state R:", self.motor_state_r)
-        stat.add("FET temp L (C):", self.temp_v_l)
-        stat.add("FET temp R (C):", self.temp_v_r)
-        stat.add("Motor temp L (C):", "unknown")
-        stat.add("Motor temp R (C):", "unknown")
-        stat.add("Motor current L (A):", self.current_l)
-        stat.add("Motor current R (A):", self.current_r)
-        stat.add("Voltage (V)", self.bus_voltage)
+            if self.left_energy_acc > self.i2t_warning_threshold:
+                stat.summary(diagnostic_msgs.msg.DiagnosticStatus.WARN, "Left motor over i2t warning threshold")
+            elif self.left_energy_acc > self.i2t_error_threshold:
+                stat.summary(diagnostic_msgs.msg.DiagnosticStatus.ERROR, "Left motor over i2t error threshold")
+            if self.right_energy_acc > self.i2t_warning_threshold:
+                stat.summary(diagnostic_msgs.msg.DiagnosticStatus.WARN, "Right motor over i2t warning threshold")
+            elif self.right_energy_acc > self.i2t_error_threshold:
+                stat.summary(diagnostic_msgs.msg.DiagnosticStatus.ERROR, "Right motor over i2t error threshold")
+            # Everything is okay:
+            else:
+                stat.summary(diagnostic_msgs.msg.DiagnosticStatus.OK, "Running")
         
         
     def pub_temperatures(self):
@@ -590,10 +603,42 @@ class ODriveNode(object):
         self.temperature_publisher_left.publish(self.temp_v_l)
         self.temperature_publisher_right.publish(self.temp_v_r)
         
-                
+    # Current publishing and i2t calculation
+    i2t_current_nominal = 2.0
+    i2t_update_rate = 0.01
+    i2t_warning_threshold = 333
+    i2t_error_threshold = 666
+    
     def pub_current(self):
         self.current_publisher_left.publish(float(self.current_l))
         self.current_publisher_right.publish(float(self.current_r))
+        
+        now = time.time()
+        
+        if not hasattr(self, 'last_pub_current_time'):
+            self.last_pub_current_time = now
+            self.left_energy_acc = 0
+            self.right_energy_acc = 0
+            return
+            
+        # calculate and publish i2t
+        dt = now - self.last_pub_current_time
+        
+        power = max(0, self.current_l**2 - self.i2t_current_nominal**2)
+        energy = power * dt
+        self.left_energy_acc *= 1 - self.i2t_update_rate * dt
+        self.left_energy_acc += energy
+        
+        power = max(0, self.current_r**2 - self.i2t_current_nominal**2)
+        energy = power * dt
+        self.right_energy_acc *= 1 - self.i2t_update_rate * dt
+        self.right_energy_acc += energy
+        
+        self.last_pub_current_time = now
+        
+        self.i2t_publisher_left.publish(float(self.left_energy_acc))
+        self.i2t_publisher_right.publish(float(self.right_energy_acc))
+        
     #     current_quantizer = 5
     #
     #     self.left_current_accumulator += self.current_l
