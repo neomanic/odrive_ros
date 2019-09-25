@@ -574,7 +574,7 @@ class ODriveNode(object):
                 stat.summary(diagnostic_msgs.msg.DiagnosticStatus.WARN, "Left motor over i2t warning threshold")
             elif self.left_energy_acc > self.i2t_error_threshold:
                 stat.summary(diagnostic_msgs.msg.DiagnosticStatus.ERROR, "Left motor over i2t error threshold")
-            if self.right_energy_acc > self.i2t_warning_threshold:
+            elif self.right_energy_acc > self.i2t_warning_threshold:
                 stat.summary(diagnostic_msgs.msg.DiagnosticStatus.WARN, "Right motor over i2t warning threshold")
             elif self.right_energy_acc > self.i2t_error_threshold:
                 stat.summary(diagnostic_msgs.msg.DiagnosticStatus.ERROR, "Right motor over i2t error threshold")
