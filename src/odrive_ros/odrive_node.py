@@ -136,6 +136,7 @@ class ODriveNode(object):
             self.temperature_publisher_left  = rospy.Publisher('left/temperature', Float64, queue_size=2)
             self.temperature_publisher_right = rospy.Publisher('right/temperature', Float64, queue_size=2)
         
+        self.i2t_error_latch = False
         if self.publish_current:
             #self.current_loop_count = 0
             #self.left_current_accumulator  = 0.0
@@ -146,6 +147,10 @@ class ODriveNode(object):
             self.i2t_publisher_right = rospy.Publisher('right/i2t', Float64, queue_size=2)
             
             rospy.logdebug("ODrive will publish motor currents.")
+            
+            self.i2t_resume_threshold  = get_param('~i2t_resume_threshold',  222)            
+            self.i2t_warning_threshold = get_param('~i2t_warning_threshold', 333)
+            self.i2t_error_threshold   = get_param('~i2t_error_threshold',   666)
         
         self.last_cmd_vel_time = rospy.Time.now()
         
@@ -381,6 +386,10 @@ class ODriveNode(object):
             
             if motor_command[0] == 'drive':
                 try:
+                    if self.publish_current and self.i2t_error_latch:
+                        # have exceeded i2t bounds
+                        return
+                    
                     if not self.driver.engaged():
                         self.driver.engage()
                         self.status = "engaged"
@@ -570,7 +579,9 @@ class ODriveNode(object):
         if self.status == "disconnected":
             stat.summary(diagnostic_msgs.msg.DiagnosticStatus.WARN, "Not connected")
         else:
-            if self.left_energy_acc > self.i2t_warning_threshold:
+            if self.i2t_error_latch:
+                stat.summary(diagnostic_msgs.msg.DiagnosticStatus.ERROR, "i2t overheated, drive ignored until cool")
+            elif self.left_energy_acc > self.i2t_warning_threshold:
                 stat.summary(diagnostic_msgs.msg.DiagnosticStatus.WARN, "Left motor over i2t warning threshold")
             elif self.left_energy_acc > self.i2t_error_threshold:
                 stat.summary(diagnostic_msgs.msg.DiagnosticStatus.ERROR, "Left motor over i2t error threshold")
@@ -606,8 +617,6 @@ class ODriveNode(object):
     # Current publishing and i2t calculation
     i2t_current_nominal = 2.0
     i2t_update_rate = 0.01
-    i2t_warning_threshold = 333
-    i2t_error_threshold = 666
     
     def pub_current(self):
         self.current_publisher_left.publish(float(self.current_l))
@@ -638,6 +647,21 @@ class ODriveNode(object):
         
         self.i2t_publisher_left.publish(float(self.left_energy_acc))
         self.i2t_publisher_right.publish(float(self.right_energy_acc))
+        
+        # stop odrive if overheated
+        if self.left_energy_acc > self.i2t_error_threshold or self.right_energy_acc > self.i2t_error_threshold:
+            if not self.i2t_error_latch:
+                self.driver.release()
+                self.status = "overheated"
+                self.i2t_error_latch = True
+                rospy.logerr("ODrive has exceeded i2t error threshold, ignoring drive commands. Waiting to cool down.")
+        elif self.i2t_error_latch:
+            if self.left_energy_acc < self.i2t_resume_threshold and self.right_energy_acc < self.i2t_resume_threshold:
+                # have cooled enough now
+                self.status = "ready"
+                self.i2t_error_latch = False
+                rospy.logerr("ODrive has cooled below i2t resume threshold, ignoring drive commands. Waiting to cool down.")
+        
         
     #     current_quantizer = 5
     #
