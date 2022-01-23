@@ -12,6 +12,7 @@ from odrive.enums import *
 import fibre
 from fibre import ChannelBrokenException, ChannelDamagedException
 
+
 default_logger = logging.getLogger(__name__)
 default_logger.setLevel(logging.DEBUG)
 
@@ -264,7 +265,7 @@ class ODriveInterfaceAPI(object):
         #try:
         self.left_axis.controller.vel_setpoint = left_motor_val
         self.right_axis.controller.vel_setpoint = -right_motor_val
-        #except (fibre.protocol.ChannelBrokenException, AttributeError) as e:
+        
         #    raise ODriveFailure(str(e))
         
     def feed_watchdog(self):

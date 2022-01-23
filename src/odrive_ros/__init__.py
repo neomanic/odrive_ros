@@ -1,1 +1,1 @@
-from odrive_node import ODriveNode, start_odrive
+from .odrive_node import ODriveNode, start_odrive
